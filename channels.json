@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "epgUrl": "https://radio.ohnggni.kr/epg/xmltv.xml",
+  "epgUrl": "https://raw.githubusercontent.com/ohnggni/k_radio_android/epg/xmltv.xml",
   "logoBase": "https://raw.githubusercontent.com/ohnggni/k_radio/main/static/images/",
   "headerSets": {
     "kbs": {
