@@ -24,7 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kr.ohnggni.kradio.ui.theme.KRadioTheme
 
-private enum class Screen { MAIN, SETTINGS, MANAGE }
+private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE }
 
 class MainActivity : ComponentActivity() {
 
@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             KRadioTheme {
                 BackHandler(enabled = screen != Screen.MAIN) {
-                    screen = if (screen == Screen.MANAGE) Screen.SETTINGS else Screen.MAIN
+                    screen = if (screen == Screen.SETTINGS) Screen.MAIN else Screen.SETTINGS
                 }
 
                 when (screen) {
@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
                         reloading = reloading,
                         onBack = { screen = Screen.MAIN },
                         onOpenManage = { screen = Screen.MANAGE },
+                        onOpenGuide = { screen = Screen.GUIDE },
                         onSaveConfig = { url ->
                             SourceSettings.setCustomConfigUrl(this, url)
                             customConfig = SourceSettings.customConfigUrl(this)
@@ -138,6 +139,7 @@ class MainActivity : ComponentActivity() {
                         onDelete = { id -> deleteCustom(id) },
                         onResetAll = { resetAll() },
                     )
+                    Screen.GUIDE -> GuideScreen(onBack = { screen = Screen.SETTINGS })
                 }
             }
         }
