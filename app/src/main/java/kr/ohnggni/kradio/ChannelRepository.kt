@@ -25,26 +25,36 @@ data class Channel(
 
 object ChannelRepository {
 
-    private const val CONFIG_URL =
-        "https://raw.githubusercontent.com/ohnggni/k_radio_android/main/channels.json"
-    private const val CACHE_FILE = "channels_cache.json"
-
     /** 설정 파일에 적힌 EPG 주소 (load 이후 사용 가능) */
     @Volatile
     var epgUrl: String? = null
         private set
 
-    /** 원격 설정을 받아오고, 실패하면 마지막으로 저장된 설정을 사용 */
+    /** 마지막 불러오기에서 원격 접속이 실패한 사유 (null = 성공) */
+    @Volatile
+    var lastError: String? = null
+        private set
+
+    /** 원격 설정을 받아오고, 실패하면 이 주소로 마지막에 저장해둔 설정을 사용 */
     suspend fun load(context: Context): List<Channel> = withContext(Dispatchers.IO) {
-        val cache = File(context.filesDir, CACHE_FILE)
-        val remote = runCatching { httpGet(CONFIG_URL, emptyMap()) }.getOrNull()
+        val url = SourceSettings.configUrl(context)
+        val cache = File(context.filesDir, "channels_cache_${url.hashCode()}.json")
+
+        val remote = runCatching { httpGet(url, emptyMap()) }
+        val remoteText = remote.getOrNull()?.takeIf { t -> runCatching { parse(t) }.isSuccess }
+        lastError = when {
+            remoteText != null -> null
+            remote.isFailure -> remote.exceptionOrNull()?.message ?: "연결 실패"
+            else -> "설정 파일 형식이 올바르지 않음"
+        }
+
         val text = when {
-            remote != null && runCatching { parse(remote) }.isSuccess -> {
-                cache.writeText(remote)
-                remote
+            remoteText != null -> {
+                cache.writeText(remoteText)
+                remoteText
             }
             cache.exists() -> cache.readText()
-            else -> error("채널 설정을 불러올 수 없음 (네트워크 확인)")
+            else -> error("채널 설정을 불러올 수 없음")
         }
         parse(text)
     }

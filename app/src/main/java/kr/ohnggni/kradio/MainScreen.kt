@@ -53,11 +53,12 @@ fun MainScreen(
     onPlayStop: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    onOpenManage: () -> Unit,
 ) {
     val current = channels.firstOrNull { it.id == currentId }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        topBar = { TopBanner(now) },          // ← 추가
+        topBar = { TopBanner(now, onOpenManage) },
         bottomBar = {
             PlayerBar(
                 ch = current,
@@ -88,7 +89,7 @@ fun MainScreen(
 private val dateFmt = SimpleDateFormat("M월 d일 (E) HH:mm", Locale.KOREA)
 
 @Composable
-private fun TopBanner(now: Long) {
+private fun TopBanner(now: Long, onSettings: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Box(
         Modifier
@@ -120,6 +121,9 @@ private fun TopBanner(now: Long) {
                     style = MaterialTheme.typography.labelMedium,
                     color = cs.onPrimaryContainer.copy(alpha = 0.75f)
                 )
+            }
+            IconButton(onClick = onSettings) {
+                Icon(IconSettings, contentDescription = "채널 관리", tint = cs.onPrimaryContainer)
             }
         }
     }
@@ -328,7 +332,7 @@ object LogoCache {
 
 // ---------------- 아이콘 (라이브러리 없이 직접 정의) ----------------
 
-private fun svgIcon(name: String, d: String): ImageVector =
+internal fun svgIcon(name: String, d: String): ImageVector =
     ImageVector.Builder(
         name = name,
         defaultWidth = 24.dp,
@@ -344,4 +348,8 @@ private val IconNext = svgIcon("next", "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z")
 private val IconRadio = svgIcon(
     "radio",
     "M3.24,6.15C2.51,6.43 2,7.17 2,8v12c0,1.1 0.89,2 2,2h16c1.11,0 2,-0.9 2,-2V8c0,-1.11 -0.89,-2 -2,-2H8.3l8.26,-3.34L15.88,1 3.24,6.15zM7,20c-1.66,0 -3,-1.34 -3,-3s1.34,-3 3,-3 3,1.34 3,3 -1.34,3 -3,3zM20,12h-2v-2h-2v2H4V8h16v4z"
+)
+private val IconSettings = svgIcon(
+    "settings",
+    "M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z"
 )

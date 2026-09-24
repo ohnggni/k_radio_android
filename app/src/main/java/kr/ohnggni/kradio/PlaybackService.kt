@@ -2,6 +2,7 @@ package kr.ohnggni.kradio
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.Uri
@@ -48,8 +49,18 @@ class PlaybackService : MediaSessionService() {
     private var exoPlayer: ExoPlayer? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    // GitHub 기본 채널 (한 번 받아서 재사용)
     @Volatile
-    private var channels: List<Channel>? = null
+    private var baseChannels: List<Channel>? = null
+
+    // 사용자 설정이 반영된 전체 채널 (숨김 포함, 주소 해석용)
+    @Volatile
+    private var allChannels: List<Channel> = emptyList()
+
+    // 채널 관리 화면에서 설정을 바꾸면 재생 목록에 바로 반영
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == ChannelPrefs.KEY || key == SourceSettings.KEY_CONFIG) scope.launch { refreshPlaylist() }
+    }
 
     // 스트림 서버(호스트)별로 붙일 헤더 (Referer 등)
     private val hostHeaders = ConcurrentHashMap<String, Map<String, String>>()
@@ -170,6 +181,8 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         runCatching { connectivity.registerDefaultNetworkCallback(networkCallback) }
+        getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
+            .registerOnSharedPreferenceChangeListener(prefsListener)
     }
 
     // ---------------- 자동 재연결 ----------------
@@ -204,8 +217,39 @@ class PlaybackService : MediaSessionService() {
 
     // ---------------- 채널 → 재생 항목 ----------------
 
-    private suspend fun getChannels(): List<Channel> =
-        channels ?: ChannelRepository.load(this).also { channels = it }
+    /** 재생 목록용 채널 (사용자 순서, 숨김 제외) */
+    private suspend fun getChannels(): List<Channel> {
+        val base = baseChannels ?: ChannelRepository.load(this).also { baseChannels = it }
+        val p = ChannelPrefs.read(this)
+        val all = ChannelPrefs.applyOrder(base, p)
+        allChannels = all
+        return all.filter { it.id !in p.hidden }
+    }
+
+    /** 재생 중인 채널은 그대로 두고 앞뒤 채널만 새 순서로 교체 (소리 끊김 없음) */
+    private suspend fun refreshPlaylist() {
+        // 설정이 바뀌었으니 GitHub 기본 설정도 새로 받고, 해석해둔 주소 캐시도 비움
+        baseChannels = runCatching { ChannelRepository.load(this) }.getOrNull() ?: baseChannels
+        resolvedCache.clear()
+        val exo = exoPlayer ?: return
+        val list = getChannels()
+        if (exo.mediaItemCount == 0) return
+        val curIdx = exo.currentMediaItemIndex
+        val curId = exo.currentMediaItem?.mediaId
+        val newIdx = list.indexOfFirst { it.id == curId }
+
+        if (curIdx + 1 < exo.mediaItemCount) exo.removeMediaItems(curIdx + 1, exo.mediaItemCount)
+        if (curIdx > 0) exo.removeMediaItems(0, curIdx)
+
+        if (newIdx >= 0) {
+            exo.addMediaItems(0, list.subList(0, newIdx).map { placeholderItem(it) })
+            exo.addMediaItems(list.subList(newIdx + 1, list.size).map { placeholderItem(it) })
+        } else {
+            // 듣던 채널을 숨긴 경우: 재생은 유지하고 나머지 채널을 뒤에 붙임
+            exo.addMediaItems(list.map { placeholderItem(it) })
+        }
+        Log.i("KRadio", "재생 목록 갱신: ${list.size}개")
+    }
 
     /** 재생목록에 올릴 항목 (주소는 kradio:// 가짜 주소, 제목은 바로 표시) */
     private fun placeholderItem(ch: Channel): MediaItem {
@@ -229,7 +273,7 @@ class PlaybackService : MediaSessionService() {
     private fun resolveSpec(spec: DataSpec): DataSpec {
         if (spec.uri.scheme == SCHEME) {
             val id = spec.uri.lastPathSegment ?: throw IOException("채널 ID 없음")
-            val ch = channels?.firstOrNull { it.id == id }
+            val ch = allChannels.firstOrNull { it.id == id }
                 ?: throw IOException("알 수 없는 채널: $id")
 
             val now = System.currentTimeMillis()
@@ -362,6 +406,8 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
+        getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
+            .unregisterOnSharedPreferenceChangeListener(prefsListener)
         scope.cancel()
         mediaSession?.run {
             player.release()
