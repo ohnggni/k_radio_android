@@ -43,6 +43,9 @@ class PlaybackService : MediaSessionService() {
     private var switchJob: Job? = null
     private var pendingId: String? = null
 
+    // 마지막으로 들은 채널 저장용
+    private val prefs by lazy { getSharedPreferences("kradio", MODE_PRIVATE) }
+
     override fun onCreate() {
         super.onCreate()
 
@@ -70,6 +73,13 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         exoPlayer = exo
+
+        // 채널이 바뀔 때마다 마지막 채널로 기록
+        exo.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                mediaItem?.mediaId?.let { prefs.edit().putString("last_channel", it).apply() }
+            }
+        })
 
         // 이전/다음 명령을 가로채서 채널 전환으로 바꾸는 래퍼
         val player = object : ForwardingPlayer(exo) {
@@ -165,6 +175,28 @@ class PlaybackService : MediaSessionService() {
                     future.set(resolved)
                 } catch (e: Exception) {
                     Log.e("KRadio", "해석 실패: ${mediaItems.map { it.mediaId }}", e)
+                    future.setException(e)
+                }
+            }
+            return future
+        }
+
+        // 앱이 꺼진 상태에서 블루투스/이어폰 재생 버튼 → 마지막 채널 재생
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            scope.launch {
+                try {
+                    val list = getChannels()
+                    val lastId = prefs.getString("last_channel", null)
+                    val ch = list.firstOrNull { it.id == lastId } ?: list.first()
+                    val item = buildPlayableItem(ch)
+                    Log.i("KRadio", "이어 듣기: ${ch.name}")
+                    future.set(MediaSession.MediaItemsWithStartPosition(listOf(item), 0, C.TIME_UNSET))
+                } catch (e: Exception) {
+                    Log.e("KRadio", "이어 듣기 실패", e)
                     future.setException(e)
                 }
             }
