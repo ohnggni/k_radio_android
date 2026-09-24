@@ -19,6 +19,8 @@ data class Channel(
     val headers: Map<String, String> = emptyMap(),
     val extractJson: String? = null,  // 예: channel_item[media_type=radio].service_url
     val extractRegex: String? = null,
+    val epg: String? = null,          // 편성표(XMLTV) 채널 아이디
+    val logo: String? = null,         // 로고 이미지 전체 주소
 )
 
 object ChannelRepository {
@@ -26,6 +28,11 @@ object ChannelRepository {
     private const val CONFIG_URL =
         "https://raw.githubusercontent.com/ohnggni/k_radio_android/main/channels.json"
     private const val CACHE_FILE = "channels_cache.json"
+
+    /** 설정 파일에 적힌 EPG 주소 (load 이후 사용 가능) */
+    @Volatile
+    var epgUrl: String? = null
+        private set
 
     /** 원격 설정을 받아오고, 실패하면 마지막으로 저장된 설정을 사용 */
     suspend fun load(context: Context): List<Channel> = withContext(Dispatchers.IO) {
@@ -63,6 +70,8 @@ object ChannelRepository {
 
     private fun parse(text: String): List<Channel> {
         val root = JSONObject(text)
+        epgUrl = root.optString("epgUrl").ifEmpty { null }
+        val logoBase = root.optString("logoBase")
         val headerSets = root.optJSONObject("headerSets")
         val arr = root.getJSONArray("channels")
         return (0 until arr.length()).map { i ->
@@ -71,6 +80,9 @@ object ChannelRepository {
             val h = if (setName.isNotEmpty()) headerSets?.optJSONObject(setName) else null
             val headers = h?.keys()?.asSequence()?.associateWith { h.getString(it) } ?: emptyMap()
             val ex = o.optJSONObject("extract")
+            val logo = o.optString("logo").ifEmpty { null }?.let {
+                if (it.startsWith("http")) it else logoBase + it
+            }
             Channel(
                 id = o.getString("id"),
                 name = o.getString("name"),
@@ -81,6 +93,8 @@ object ChannelRepository {
                 headers = headers,
                 extractJson = ex?.optString("json")?.ifEmpty { null },
                 extractRegex = ex?.optString("regex")?.ifEmpty { null },
+                epg = o.optString("epg").ifEmpty { null },
+                logo = logo,
             )
         }
     }

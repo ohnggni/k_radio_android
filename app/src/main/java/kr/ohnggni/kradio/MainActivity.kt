@@ -2,6 +2,7 @@ package kr.ohnggni.kradio
 
 import android.content.ComponentName
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -54,6 +55,11 @@ class MainActivity : ComponentActivity() {
             try {
                 channels = ChannelRepository.load(this@MainActivity)
                 status = ""
+                // [확인용] 채널별 현재 방송
+                val epg = EpgRepository.load(this@MainActivity, ChannelRepository.epgUrl)
+                channels.forEach { ch ->
+                    Log.i("KRadio", "EPG ${ch.name}: ${epg.current(ch.epg)?.title ?: "(정보 없음)"}")
+                }
             } catch (e: Exception) {
                 status = "채널 로드 실패: ${e.message}"
             }
