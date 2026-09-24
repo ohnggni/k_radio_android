@@ -53,16 +53,29 @@ object EpgRepository {
     @Volatile private var memory: EpgData? = null
     @Volatile private var memoryLoadedAt = 0L
 
+    @Volatile private var memoryUrl: String? = null
+
+    /** 마지막 다운로드 실패 사유 (null = 성공) */
+    @Volatile
+    var lastError: String? = null
+        private set
+
     suspend fun load(context: Context, url: String?, force: Boolean = false): EpgData =
         withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()
-            memory?.let { if (!force && now - memoryLoadedAt < REFRESH_MS) return@withContext it }
+            memory?.let {
+                if (!force && url == memoryUrl && now - memoryLoadedAt < REFRESH_MS) return@withContext it
+            }
 
-            val cache = File(context.filesDir, CACHE_FILE)
+            val cache = File(context.filesDir, "epg_cache_${url.hashCode()}.xml")
             val cacheFresh = cache.exists() && now - cache.lastModified() < REFRESH_MS
             if ((force || !cacheFresh) && url != null) {
                 runCatching { download(url, cache) }
-                    .onFailure { Log.w("KRadio", "EPG 다운로드 실패: ${it.message}") }
+                    .onSuccess { lastError = null }
+                    .onFailure {
+                        lastError = it.message ?: "연결 실패"
+                        Log.w("KRadio", "EPG 다운로드 실패: ${it.message}")
+                    }
             }
 
             val data = if (cache.exists()) {
@@ -74,6 +87,7 @@ object EpgRepository {
 
             memory = data
             memoryLoadedAt = now
+            memoryUrl = url
             data
         }
 
