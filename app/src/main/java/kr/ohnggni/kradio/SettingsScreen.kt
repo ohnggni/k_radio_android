@@ -23,6 +23,7 @@ fun SettingsScreen(
     reloading: Boolean,
     onBack: () -> Unit,
     onOpenManage: () -> Unit,
+    onOpenGuide: () -> Unit,
     onSaveConfig: (String?) -> Unit,
     onSaveEpg: (String?) -> Unit,
     onReload: () -> Unit,
@@ -73,6 +74,11 @@ fun SettingsScreen(
                 value = customEpg ?: if (customConfig != null) "채널 설정 파일에 지정된 편성표" else "KRadio 기본 제공",
                 error = epgError,
                 onClick = { editEpg = true }
+            )
+            SettingRow(
+                title = "데이터 형식 안내",
+                value = "직접 데이터를 만들어 쓸 때 참고하세요",
+                onClick = onOpenGuide
             )
             OutlinedButton(
                 onClick = onReload,
