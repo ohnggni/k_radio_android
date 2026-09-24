@@ -16,6 +16,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -55,6 +57,7 @@ fun MainScreen(
     val current = channels.firstOrNull { it.id == currentId }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        topBar = { TopBanner(now) },          // ← 추가
         bottomBar = {
             PlayerBar(
                 ch = current,
@@ -82,6 +85,45 @@ fun MainScreen(
     }
 }
 
+private val dateFmt = SimpleDateFormat("M월 d일 (E) HH:mm", Locale.KOREA)
+
+@Composable
+private fun TopBanner(now: Long) {
+    val cs = MaterialTheme.colorScheme
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()                                  // 상태표시줄은 비워두고
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.horizontalGradient(listOf(cs.primaryContainer, cs.secondaryContainer))
+            )
+            .padding(horizontal = 18.dp, vertical = 12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                IconRadio,
+                contentDescription = null,
+                tint = cs.primary,
+                modifier = Modifier.size(28.dp)
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "KRadio",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = cs.onPrimaryContainer
+                )
+                Text(
+                    dateFmt.format(Date(now)),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = cs.onPrimaryContainer.copy(alpha = 0.75f)
+                )
+            }
+        }
+    }
+}
 @Composable
 private fun ChannelRow(
     ch: Channel,
@@ -93,35 +135,49 @@ private fun ChannelRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .height(IntrinsicSize.Min),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ChannelLogo(ch.logo, ch.name, Modifier.size(48.dp))
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                ch.name,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                program?.label() ?: "편성 정보 없음",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        if (program != null) {
-            Spacer(Modifier.width(8.dp))
-            Text(
-                program.timeRange(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        // 선택된 채널: 왼쪽 세로 강조 막대
+        Box(
+            Modifier
+                .width(4.dp)
+                .fillMaxHeight()
+                .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
+        )
+        Row(
+            Modifier
+                .weight(1f)
+                .padding(start = 12.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ChannelLogo(ch.logo, ch.name, Modifier.size(48.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    ch.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    program?.label() ?: "편성 정보 없음",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (program != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    program.timeRange(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -137,20 +193,36 @@ private fun PlayerBar(
     onPrev: () -> Unit,
     onNext: () -> Unit,
 ) {
-    Surface(tonalElevation = 3.dp, shadowElevation = 8.dp) {
+    val container = MaterialTheme.colorScheme.primaryContainer
+    val onContainer = MaterialTheme.colorScheme.onPrimaryContainer
+    Surface(
+        color = container,
+        contentColor = onContainer,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+        shadowElevation = 12.dp,
+    ) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ChannelLogo(ch?.logo, ch?.name ?: "K", Modifier.size(44.dp))
-            Spacer(Modifier.width(10.dp))
+            ChannelLogo(ch?.logo, ch?.name ?: "K", Modifier.size(56.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
+                    when {
+                        ch == null -> "대기 중"
+                        isOn -> "● 재생 중"
+                        else -> "정지됨"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isOn) MaterialTheme.colorScheme.primary else onContainer.copy(alpha = 0.7f)
+                )
+                Text(
                     ch?.name ?: "채널을 선택하세요",
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -159,8 +231,7 @@ private fun PlayerBar(
                     Text(
                         sub,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (status.isNotEmpty()) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = onContainer.copy(alpha = 0.8f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -169,8 +240,20 @@ private fun PlayerBar(
             IconButton(onClick = onPrev, enabled = enabled && ch != null) {
                 Icon(IconPrev, contentDescription = "이전 채널")
             }
-            FilledIconButton(onClick = onPlayStop, enabled = enabled) {
-                Icon(if (isOn) IconStop else IconPlay, contentDescription = if (isOn) "정지" else "재생")
+            FilledIconButton(
+                onClick = onPlayStop,
+                enabled = enabled,
+                modifier = Modifier.size(52.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Icon(
+                    if (isOn) IconStop else IconPlay,
+                    contentDescription = if (isOn) "정지" else "재생",
+                    modifier = Modifier.size(28.dp)
+                )
             }
             IconButton(onClick = onNext, enabled = enabled && ch != null) {
                 Icon(IconNext, contentDescription = "다음 채널")
@@ -258,3 +341,7 @@ private val IconPlay = svgIcon("play", "M8,5v14l11,-7z")
 private val IconStop = svgIcon("stop", "M6,6h12v12H6z")
 private val IconPrev = svgIcon("prev", "M6,6h2v12H6zM9.5,12l8.5,6V6z")
 private val IconNext = svgIcon("next", "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z")
+private val IconRadio = svgIcon(
+    "radio",
+    "M3.24,6.15C2.51,6.43 2,7.17 2,8v12c0,1.1 0.89,2 2,2h16c1.11,0 2,-0.9 2,-2V8c0,-1.11 -0.89,-2 -2,-2H8.3l8.26,-3.34L15.88,1 3.24,6.15zM7,20c-1.66,0 -3,-1.34 -3,-3s1.34,-3 3,-3 3,1.34 3,3 -1.34,3 -3,3zM20,12h-2v-2h-2v2H4V8h16v4z"
+)
