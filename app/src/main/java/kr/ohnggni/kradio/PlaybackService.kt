@@ -6,9 +6,11 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
@@ -20,6 +22,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -29,11 +32,16 @@ import java.util.concurrent.ConcurrentHashMap
 class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
+    private var exoPlayer: ExoPlayer? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var channels: List<Channel>? = null
 
     // 스트림 서버(호스트)별로 붙일 헤더 (Referer 등)
     private val hostHeaders = ConcurrentHashMap<String, Map<String, String>>()
+
+    // 채널 전환 연타 처리용
+    private var switchJob: Job? = null
+    private var pendingId: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -49,7 +57,7 @@ class PlaybackService : MediaSessionService() {
             if (h.isNullOrEmpty()) spec else spec.withAdditionalHeaders(h)
         }
 
-        val player = ExoPlayer.Builder(this)
+        val exo = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -61,6 +69,28 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        exoPlayer = exo
+
+        // 이전/다음 명령을 가로채서 채널 전환으로 바꾸는 래퍼
+        val player = object : ForwardingPlayer(exo) {
+            override fun getAvailableCommands(): Player.Commands =
+                super.getAvailableCommands().buildUpon()
+                    .addAll(
+                        Player.COMMAND_SEEK_TO_NEXT,
+                        Player.COMMAND_SEEK_TO_PREVIOUS,
+                        Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
+                    )
+                    .build()
+
+            override fun isCommandAvailable(command: Int): Boolean =
+                availableCommands.contains(command)
+
+            override fun seekToNext() = switchChannel(+1)
+            override fun seekToNextMediaItem() = switchChannel(+1)
+            override fun seekToPrevious() = switchChannel(-1)
+            override fun seekToPreviousMediaItem() = switchChannel(-1)
+        }
 
         mediaSession = MediaSession.Builder(this, player)
             .setCallback(SessionCallback())
@@ -70,7 +100,33 @@ class PlaybackService : MediaSessionService() {
     private suspend fun getChannels(): List<Channel> =
         channels ?: ChannelRepository.load(this).also { channels = it }
 
-    /** 채널 ID → 실제 재생 가능한 MediaItem */
+    /** 현재 채널 기준으로 delta(+1/-1)만큼 이동 */
+    private fun switchChannel(delta: Int) {
+        val baseId = pendingId ?: exoPlayer?.currentMediaItem?.mediaId
+        switchJob?.cancel()
+        switchJob = scope.launch {
+            try {
+                val list = getChannels()
+                if (list.isEmpty()) return@launch
+                val idx = list.indexOfFirst { it.id == baseId }
+                val target = list[if (idx < 0) 0 else (idx + delta + list.size) % list.size]
+                pendingId = target.id
+                val item = buildPlayableItem(target)
+                exoPlayer?.run {
+                    setMediaItem(item)
+                    prepare()
+                    play()
+                }
+                Log.i("KRadio", "채널 전환: ${target.name}")
+            } catch (e: Exception) {
+                Log.e("KRadio", "채널 전환 실패", e)
+            } finally {
+                pendingId = null
+            }
+        }
+    }
+
+    /** 채널 → 실제 재생 가능한 MediaItem */
     private suspend fun buildPlayableItem(ch: Channel): MediaItem {
         val url = ChannelRepository.resolve(ch)
         Uri.parse(url).host?.let { host ->
@@ -133,6 +189,7 @@ class PlaybackService : MediaSessionService() {
             release()
             mediaSession = null
         }
+        exoPlayer = null
         super.onDestroy()
     }
 }
