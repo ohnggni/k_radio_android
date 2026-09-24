@@ -2,6 +2,8 @@ package kr.ohnggni.kradio
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
@@ -11,6 +13,7 @@ import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
@@ -25,8 +28,10 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.IOException
@@ -34,6 +39,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 private const val SCHEME = "kradio"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
+private const val MAX_RETRY_DELAY_MS = 30_000L       // 재연결 최대 대기 간격
 
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
@@ -53,6 +59,25 @@ class PlaybackService : MediaSessionService() {
 
     // 마지막으로 들은 채널 저장용
     private val prefs by lazy { getSharedPreferences("kradio", MODE_PRIVATE) }
+
+    // 자동 재연결 상태
+    private var retryJob: Job? = null
+    private var retryCount = 0
+
+    // 네트워크 복구 감지
+    private val connectivity by lazy { getSystemService(ConnectivityManager::class.java) }
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            scope.launch {
+                val exo = exoPlayer ?: return@launch
+                if (exo.playWhenReady && exo.playerError != null) {
+                    Log.i("KRadio", "네트워크 복구 → 즉시 재연결")
+                    retryJob?.cancel()
+                    retryNow()
+                }
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -82,10 +107,27 @@ class PlaybackService : MediaSessionService() {
         exo.repeatMode = Player.REPEAT_MODE_ALL // 마지막 채널 다음 → 첫 채널
         exoPlayer = exo
 
-        // 채널이 바뀔 때마다 마지막 채널로 기록
         exo.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // 채널이 바뀌면 마지막 채널로 기록하고, 이전 채널 재연결 시도는 취소
                 mediaItem?.mediaId?.let { prefs.edit().putString("last_channel", it).apply() }
+                cancelRetry()
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                scheduleRetry(error.errorCodeName)
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying && retryCount > 0) {
+                    Log.i("KRadio", "재연결 성공")
+                    cancelRetry()
+                }
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                // 사용자가 정지하면 재연결 중단
+                if (!playWhenReady) cancelRetry()
             }
         })
 
@@ -96,8 +138,7 @@ class PlaybackService : MediaSessionService() {
                         Player.COMMAND_SEEK_TO_NEXT,
                         Player.COMMAND_SEEK_TO_PREVIOUS,
                         Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
-                        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
-                        Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM
+                        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
                     )
                     .build()
 
@@ -106,28 +147,13 @@ class PlaybackService : MediaSessionService() {
 
             // 라디오는 이전/다음 = 항상 채널 이동 (라이브 구간 처음으로 가는 동작 방지)
             override fun seekToNext() {
-                Log.i("KRadio", "명령: seekToNext")
                 exo.seekToNextMediaItem()
                 if (exo.playbackState == Player.STATE_IDLE) exo.prepare()
             }
 
             override fun seekToPrevious() {
-                Log.i("KRadio", "명령: seekToPrevious")
                 exo.seekToPreviousMediaItem()
                 if (exo.playbackState == Player.STATE_IDLE) exo.prepare()
-            }
-
-            override fun seekTo(positionMs: Long) { /* 라이브 방송이라 탐색 무시 */ }
-            override fun isCurrentMediaItemLive(): Boolean = false // 워치 호환
-            // [진단] 워치 큐에서 채널 누를 때 오는 명령
-            override fun seekToDefaultPosition(mediaItemIndex: Int) {
-                Log.i("KRadio", "명령: seekToDefaultPosition($mediaItemIndex)")
-                super.seekToDefaultPosition(mediaItemIndex)
-            }
-
-            override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
-                Log.i("KRadio", "명령: seekTo($mediaItemIndex, $positionMs)")
-                super.seekTo(mediaItemIndex, positionMs)
             }
         }
 
@@ -142,7 +168,41 @@ class PlaybackService : MediaSessionService() {
             .setCallback(SessionCallback())
             .setSessionActivity(openApp)
             .build()
+
+        runCatching { connectivity.registerDefaultNetworkCallback(networkCallback) }
     }
+
+    // ---------------- 자동 재연결 ----------------
+
+    private fun scheduleRetry(reason: String) {
+        val exo = exoPlayer ?: return
+        if (!exo.playWhenReady) return              // 사용자가 정지한 상태면 재시도 안 함
+        if (retryJob?.isActive == true) return      // 이미 예약됨
+        val delayMs = (1000L shl retryCount.coerceAtMost(5)).coerceAtMost(MAX_RETRY_DELAY_MS)
+        retryCount++
+        Log.w("KRadio", "재연결 예약: ${delayMs}ms 후 (${retryCount}번째) - $reason")
+        retryJob = scope.launch {
+            delay(delayMs)
+            retryNow()
+        }
+    }
+
+    private fun retryNow() {
+        val exo = exoPlayer ?: return
+        if (!exo.playWhenReady) return
+        // 토큰 만료 대비: 캐시된 주소를 버리고 새로 해석하게 함
+        exo.currentMediaItem?.mediaId?.let { resolvedCache.remove(it) }
+        exo.seekToDefaultPosition() // 라이브 최신 지점으로
+        exo.prepare()
+    }
+
+    private fun cancelRetry() {
+        retryJob?.cancel()
+        retryJob = null
+        retryCount = 0
+    }
+
+    // ---------------- 채널 → 재생 항목 ----------------
 
     private suspend fun getChannels(): List<Channel> =
         channels ?: ChannelRepository.load(this).also { channels = it }
@@ -194,7 +254,10 @@ class PlaybackService : MediaSessionService() {
         return if (h.isNullOrEmpty()) spec else spec.withAdditionalHeaders(h)
     }
 
+    // ---------------- 세션 콜백 ----------------
+
     private inner class SessionCallback : MediaSession.Callback {
+
         // 워치 플러그인 등 외부 컨트롤러에도 전체 조작 권한 부여
         // (Media3 최신 버전은 신뢰되지 않은 컨트롤러를 읽기 전용으로 제한함)
         override fun onConnectAsync(
@@ -206,6 +269,7 @@ class PlaybackService : MediaSessionService() {
                 MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
             )
         }
+
         // 화면에서 채널 하나를 요청하면 → 전체 채널 목록 + 그 채널부터 재생
         override fun onSetMediaItems(
             mediaSession: MediaSession,
@@ -296,6 +360,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
         scope.cancel()
         mediaSession?.run {
             player.release()
