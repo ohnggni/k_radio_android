@@ -21,6 +21,7 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("debug") // ← 추가 (임시)
             optimization {
                 enable = false
             }
