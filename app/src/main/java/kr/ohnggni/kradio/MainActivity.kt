@@ -24,13 +24,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kr.ohnggni.kradio.ui.theme.KRadioTheme
 
+private enum class Screen { MAIN, SETTINGS, MANAGE }
+
 class MainActivity : ComponentActivity() {
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller by mutableStateOf<MediaController?>(null)
 
-    private var base by mutableStateOf<List<Channel>>(emptyList())   // GitHub 기본 채널
-    private var prefs by mutableStateOf(ChannelPrefsData())          // 사용자 설정
+    private var base by mutableStateOf<List<Channel>>(emptyList())   // 기본 채널 (출처에서 받은 것)
+    private var prefs by mutableStateOf(ChannelPrefsData())          // 사용자 채널 설정
     private val allChannels: List<Channel> get() = ChannelPrefs.applyOrder(base, prefs)
     private val channels: List<Channel> get() = ChannelPrefs.visible(base, prefs)
 
@@ -39,26 +41,36 @@ class MainActivity : ComponentActivity() {
     private var currentId by mutableStateOf<String?>(null)
     private var isOn by mutableStateOf(false)
     private var status by mutableStateOf("채널 목록 불러오는 중...")
-    private var showManage by mutableStateOf(false)
+
+    private var screen by mutableStateOf(Screen.MAIN)
+    private var warning by mutableStateOf<String?>(null)
+    private var reloading by mutableStateOf(false)
+    private var customConfig by mutableStateOf<String?>(null)
+    private var customEpg by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        customConfig = SourceSettings.customConfigUrl(this)
+        customEpg = SourceSettings.customEpgUrl(this)
+
         lifecycleScope.launch {
+            prefs = ChannelPrefs.read(this@MainActivity)
             try {
                 base = ChannelRepository.load(this@MainActivity)
-                prefs = ChannelPrefs.read(this@MainActivity)
                 status = ""
             } catch (e: Exception) {
-                status = "채널 로드 실패: ${e.message}"
-                return@launch
+                status = "채널 정보를 불러올 수 없어요"
             }
+            updateWarning()
+
             // 화면이 보이는 동안 매 분 정각마다 편성 정보 갱신
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
                     epg = EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity))
                     now = System.currentTimeMillis()
+                    updateWarning()
                     delay(60_000L - now % 60_000L)
                 }
             }
@@ -66,29 +78,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             KRadioTheme {
-                BackHandler(enabled = showManage) { showManage = false }
+                BackHandler(enabled = screen != Screen.MAIN) {
+                    screen = if (screen == Screen.MANAGE) Screen.SETTINGS else Screen.MAIN
+                }
 
-                if (showManage) {
-                    ChannelManageScreen(
-                        all = allChannels,
-                        defaults = base.associateBy { it.id },
-                        hidden = prefs.hidden,
-                        overrides = prefs.overrides,
-                        onBack = { showManage = false },
-                        onReorder = { ids -> updatePrefs(prefs.copy(order = ids)) },
-                        onToggleVisible = { id, visible ->
-                            updatePrefs(
-                                prefs.copy(hidden = if (visible) prefs.hidden - id else prefs.hidden + id)
-                            )
-                        },
-                        onAdd = { name, url, logo -> addCustom(name, url, logo.ifBlank { null }) },
-                        onEdit = { id, name, url, logo -> editChannel(id, name, url, logo) },
-                        onResetChannel = { id -> updatePrefs(prefs.copy(overrides = prefs.overrides - id)) },
-                        onDelete = { id -> deleteCustom(id) },
-                        onResetAll = { resetAll() },
-                    )
-                } else {
-                    MainScreen(
+                when (screen) {
+                    Screen.MAIN -> MainScreen(
                         channels = channels,
                         epg = epg,
                         now = now,
@@ -100,7 +95,48 @@ class MainActivity : ComponentActivity() {
                         onPlayStop = { playStop() },
                         onPrev = { controller?.seekToPrevious() },
                         onNext = { controller?.seekToNext() },
-                        onOpenManage = { showManage = true },
+                        warning = warning,
+                        onOpenSettings = { screen = Screen.SETTINGS },
+                    )
+
+                    Screen.SETTINGS -> SettingsScreen(
+                        customConfig = customConfig,
+                        customEpg = customEpg,
+                        configError = ChannelRepository.lastError,
+                        epgError = EpgRepository.lastError,
+                        reloading = reloading,
+                        onBack = { screen = Screen.MAIN },
+                        onOpenManage = { screen = Screen.MANAGE },
+                        onSaveConfig = { url ->
+                            SourceSettings.setCustomConfigUrl(this, url)
+                            customConfig = SourceSettings.customConfigUrl(this)
+                            reloadSources()
+                        },
+                        onSaveEpg = { url ->
+                            SourceSettings.setCustomEpgUrl(this, url)
+                            customEpg = SourceSettings.customEpgUrl(this)
+                            reloadSources()
+                        },
+                        onReload = { reloadSources() },
+                    )
+
+                    Screen.MANAGE -> ChannelManageScreen(
+                        all = allChannels,
+                        defaults = base.associateBy { it.id },
+                        hidden = prefs.hidden,
+                        overrides = prefs.overrides,
+                        onBack = { screen = Screen.SETTINGS },
+                        onReorder = { ids -> updatePrefs(prefs.copy(order = ids)) },
+                        onToggleVisible = { id, visible ->
+                            updatePrefs(
+                                prefs.copy(hidden = if (visible) prefs.hidden - id else prefs.hidden + id)
+                            )
+                        },
+                        onAdd = { name, url, logo -> addCustom(name, url, logo.ifBlank { null }) },
+                        onEdit = { id, name, url, logo -> editChannel(id, name, url, logo) },
+                        onResetChannel = { id -> updatePrefs(prefs.copy(overrides = prefs.overrides - id)) },
+                        onDelete = { id -> deleteCustom(id) },
+                        onResetAll = { resetAll() },
                     )
                 }
             }
@@ -138,6 +174,44 @@ class MainActivity : ComponentActivity() {
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controller = null
         super.onStop()
+    }
+
+    // ---------------- 데이터 출처 ----------------
+
+    private fun reloadSources() {
+        lifecycleScope.launch {
+            reloading = true
+            runCatching { ChannelRepository.load(this@MainActivity) }
+                .onSuccess {
+                    base = it
+                    if (status.startsWith("채널 정보")) status = ""
+                }
+            epg = EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity), force = true)
+            now = System.currentTimeMillis()
+            updateWarning()
+            reloading = false
+        }
+    }
+
+    /** 원격 접속 실패 시 메인 화면에 띄울 안내 문구 */
+    private fun updateWarning() {
+        val cfgErr = ChannelRepository.lastError != null
+        val epgErr = EpgRepository.lastError != null
+        if (!cfgErr && !epgErr) {
+            warning = null
+            return
+        }
+        val what = listOfNotNull(
+            if (cfgErr) "채널 정보" else null,
+            if (epgErr) "편성표" else null
+        ).joinToString("·")
+        val failedDefault =
+            (cfgErr && customConfig == null) || (epgErr && customEpg == null && customConfig == null)
+        warning = if (failedDefault) {
+            "$what 기본 서버에 연결할 수 없어요. 저장된 정보로 표시 중이에요. 계속 안 되면 설정에서 다른 데이터 주소를 지정해 보세요."
+        } else {
+            "$what 서버(직접 지정한 주소)에 연결할 수 없어요. 설정에서 주소를 확인해 주세요."
+        }
     }
 
     // ---------------- 채널 설정 ----------------
@@ -194,7 +268,7 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** 순서·숨김·수정 초기화 + GitHub 설정 다시 받기 (내 채널은 유지) */
+    /** 순서·숨김·수정 초기화 + 출처에서 다시 받기 (내 채널은 유지) */
     private fun resetAll() {
         lifecycleScope.launch {
             runCatching { ChannelRepository.load(this@MainActivity) }.onSuccess { base = it }
