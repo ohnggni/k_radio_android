@@ -228,15 +228,22 @@ class PlaybackService : MediaSessionService() {
 
     /** 재생 중인 채널은 그대로 두고 앞뒤 채널만 새 순서로 교체 (소리 끊김 없음) */
     private suspend fun refreshPlaylist() {
-        // 설정이 바뀌었으니 GitHub 기본 설정도 새로 받고, 해석해둔 주소 캐시도 비움
+        val exo = exoPlayer ?: return
+        if (exo.mediaItemCount == 0) return   // 재생 목록이 없으면 갱신할 것도 없음
+
+        // 설정이 바뀌었으니 출처에서 새로 받고, 해석해둔 주소 캐시도 비움
         baseChannels = runCatching { ChannelRepository.load(this) }.getOrNull() ?: baseChannels
         resolvedCache.clear()
-        val exo = exoPlayer ?: return
-        val list = getChannels()
-        if (exo.mediaItemCount == 0) return
+
+        // 불러오기에 실패해도 앱이 죽지 않고 지금 재생은 그대로 유지
+        val list = runCatching { getChannels() }.getOrElse {
+            Log.w("KRadio", "재생 목록 갱신 실패: ${it.message}")
+            return
+        }
         val curIdx = exo.currentMediaItemIndex
         val curId = exo.currentMediaItem?.mediaId
         val newIdx = list.indexOfFirst { it.id == curId }
+        // ... (이하 기존 그대로)
 
         if (curIdx + 1 < exo.mediaItemCount) exo.removeMediaItems(curIdx + 1, exo.mediaItemCount)
         if (curIdx > 0) exo.removeMediaItems(0, curIdx)

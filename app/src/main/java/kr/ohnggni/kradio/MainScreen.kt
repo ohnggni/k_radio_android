@@ -53,12 +53,18 @@ fun MainScreen(
     onPlayStop: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
-    onOpenManage: () -> Unit,
+    warning: String?,
+    onOpenSettings: () -> Unit,
 ) {
     val current = channels.firstOrNull { it.id == currentId }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        topBar = { TopBanner(now, onOpenManage) },
+        topBar = {
+            Column {
+                TopBanner(now, onOpenSettings)
+                warning?.let { WarningCard(it, onOpenSettings) }
+            }
+        },
         bottomBar = {
             PlayerBar(
                 ch = current,
@@ -88,6 +94,25 @@ fun MainScreen(
 
 private val dateFmt = SimpleDateFormat("M월 d일 (E) HH:mm", Locale.KOREA)
 
+@Composable
+private fun WarningCard(text: String, onSettings: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Row(
+            Modifier.padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            TextButton(onClick = onSettings) { Text("설정") }
+        }
+    }
+}
 @Composable
 private fun TopBanner(now: Long, onSettings: () -> Unit) {
     val cs = MaterialTheme.colorScheme
