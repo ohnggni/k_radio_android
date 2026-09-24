@@ -119,13 +119,12 @@ private fun TopBanner(now: Long, onSettings: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .statusBarsPadding()                                  // 상태표시줄은 비워두고
-            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .statusBarsPadding()                     // 상태표시줄은 침범하지 않고
+            .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)) // 아래쪽만 둥글게
             .background(
                 Brush.horizontalGradient(listOf(cs.primaryContainer, cs.secondaryContainer))
             )
-            .padding(horizontal = 18.dp, vertical = 12.dp)
+            .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
