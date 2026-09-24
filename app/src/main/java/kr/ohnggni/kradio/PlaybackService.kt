@@ -216,6 +216,7 @@ class PlaybackService : MediaSessionService() {
                 MediaMetadata.Builder()
                     .setTitle(ch.name)
                     .setArtist(ch.group)
+                    .setArtworkUri(ch.logo?.let { Uri.parse(it) }) // ← 추가
                     .build()
             )
         if (ch.type == "api" || ch.url?.contains(".m3u8") == true) {

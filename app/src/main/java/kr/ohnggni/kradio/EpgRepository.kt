@@ -12,6 +12,7 @@ import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Locale
 
+private const val SHORT_MS = 5 * 60_000L // 5분 미만 = 날씨·캠페인 같은 짧은 편성
 data class Program(
     val start: Long,
     val stop: Long,
@@ -28,6 +29,19 @@ class EpgData(private val byChannel: Map<String, List<Program>>) {
     fun next(epgId: String?, now: Long = System.currentTimeMillis()): Program? =
         epgId?.let { id -> byChannel[id]?.firstOrNull { it.start >= now } }
 
+    /** 화면 표시용: 짧은 편성은 건너뛰고 앞뒤 본 프로그램을 보여줌 */
+    fun display(epgId: String?, now: Long = System.currentTimeMillis()): Program? {
+        val list = epgId?.let { byChannel[it] } ?: return null
+        val idx = list.indexOfFirst { now >= it.start && now < it.stop }
+        if (idx < 0) return null
+        val cur = list[idx]
+        if (cur.stop - cur.start >= SHORT_MS) return cur
+        // 직전 본 프로그램이 10분 이내에 끝났으면 그것을, 아니면 다음 본 프로그램을
+        list.subList(0, idx).lastOrNull { it.stop - it.start >= SHORT_MS }
+            ?.takeIf { cur.start - it.stop <= 10 * 60_000L }
+            ?.let { return it }
+        return list.drop(idx + 1).firstOrNull { it.stop - it.start >= SHORT_MS } ?: cur
+    }
     val isEmpty: Boolean get() = byChannel.isEmpty()
 }
 
