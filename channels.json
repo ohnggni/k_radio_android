@@ -77,6 +77,10 @@
       "url": "http://radio2.tbn.or.kr:1935/gyeongin/myStream/playlist.m3u8" },
     { "id": "ifm",          "name": "경인방송 iFM", "group": "기타", "type": "direct",
       "epg": "1974895.naver", "logo": "itv.png",
-      "url": "https://stream.ifm.kr/live/aod1/playlist.m3u8" }
+      "url": "https://stream.ifm.kr/live/aod1/playlist.m3u8" },
+    { "id": "arirang",      "name": "아리랑 라디오", "group": "기타", "type": "direct",
+      "epg": "라디오 Arirang.daum",
+      "logo": "https://raw.githubusercontent.com/ohnggni/k_radio_android/main/logos/arirang.png",
+      "url": "https://amdlive-ch03-ctnd-com.akamaized.net/arirang_3ch/smil:arirang_3ch.smil/chunklist_b656000_sleng.m3u8" }
   ]
 }
