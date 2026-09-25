@@ -1,6 +1,8 @@
 package kr.ohnggni.kradio
 
 import android.content.ComponentName
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -10,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -23,9 +26,6 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kr.ohnggni.kradio.ui.theme.KRadioTheme
-import android.content.Intent
-import android.net.Uri
-import androidx.core.content.pm.PackageInfoCompat
 
 private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE }
 
@@ -56,6 +56,10 @@ class MainActivity : ComponentActivity() {
     private var newVersion by mutableStateOf<String?>(null)    // 설치된 것보다 새 버전 이름
     private var updateNotice by mutableStateOf<String?>(null)  // 메인 화면 안내 카드
 
+    private var startupMode by mutableStateOf(StartupSettings.MODE_NONE)
+    private var startupChannel by mutableStateOf<String?>(null)
+    private var pendingAutoStart = false   // 앱을 새로 켰을 때만 true
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -63,6 +67,11 @@ class MainActivity : ComponentActivity() {
             appVersionName = it.versionName.orEmpty()
             appVersionCode = PackageInfoCompat.getLongVersionCode(it)
         }
+
+        // 폴드 접기/펴기 등으로 화면만 다시 만들어질 때는 자동 재생하지 않음
+        pendingAutoStart = savedInstanceState == null
+        startupMode = StartupSettings.mode(this)
+        startupChannel = StartupSettings.fixedChannel(this)
 
         customConfig = SourceSettings.customConfigUrl(this)
         customEpg = SourceSettings.customEpgUrl(this)
@@ -77,6 +86,7 @@ class MainActivity : ComponentActivity() {
             }
             updateWarning()
             updateUpdateInfo()
+            tryAutoStart()
 
             // 화면이 보이는 동안 매 분 정각마다 편성 정보 갱신
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -138,6 +148,14 @@ class MainActivity : ComponentActivity() {
                         appVersion = appVersionName,
                         newVersion = newVersion,
                         onOpenUpdate = { openUpdate() },
+                        channels = channels,
+                        startupMode = startupMode,
+                        startupChannel = startupChannel,
+                        onSaveStartup = { mode, id ->
+                            StartupSettings.save(this, mode, id)
+                            startupMode = mode
+                            startupChannel = id
+                        },
                     )
 
                     Screen.MANAGE -> ChannelManageScreen(
@@ -188,6 +206,7 @@ class MainActivity : ComponentActivity() {
                     status = "연결 끊김 · 재연결 중..."
                 }
             })
+            tryAutoStart()
         }, MoreExecutors.directExecutor())
     }
 
@@ -327,6 +346,16 @@ class MainActivity : ComponentActivity() {
     }
 
     // ---------------- 재생 ----------------
+    /** 앱을 새로 켰을 때 설정에 따라 자동 재생 (이미 재생 중이면 그대로 둠) */
+    private fun tryAutoStart() {
+        if (!pendingAutoStart) return
+        val c = controller ?: return
+        if (channels.isEmpty()) return
+        pendingAutoStart = false
+        if (c.playWhenReady) return
+        val id = StartupSettings.launchChannelId(this, channels) ?: return
+        channels.firstOrNull { it.id == id }?.let { playChannel(it) }
+    }
 
     private fun playChannel(ch: Channel) {
         val c = controller ?: return
@@ -350,9 +379,8 @@ class MainActivity : ComponentActivity() {
                 c.play()
             }
             else -> {
-                val lastId = getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
-                    .getString("last_channel", null)
-                (channels.firstOrNull { it.id == lastId } ?: channels.firstOrNull())
+                val targetId = StartupSettings.resumeChannelId(this, channels)
+                (channels.firstOrNull { it.id == targetId } ?: channels.firstOrNull())
                     ?.let { playChannel(it) }
             }
         }

@@ -30,9 +30,14 @@ fun SettingsScreen(
     appVersion: String,
     newVersion: String?,
     onOpenUpdate: () -> Unit,
+    channels: List<Channel>,
+    startupMode: String,
+    startupChannel: String?,
+    onSaveStartup: (String, String?) -> Unit,
 ) {
     var editConfig by remember { mutableStateOf(false) }
     var editEpg by remember { mutableStateOf(false) }
+    var editStartup by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -61,6 +66,17 @@ fun SettingsScreen(
                 title = "채널 관리",
                 value = "순서 변경 · 숨기기 · 추가 · 수정",
                 onClick = onOpenManage
+            )
+            SettingRow(
+                title = "시작 시 재생",
+                value = when (startupMode) {
+                    StartupSettings.MODE_LAST -> "마지막으로 들은 채널"
+                    StartupSettings.MODE_FIXED -> channels.firstOrNull { it.id == startupChannel }
+                        ?.let { "지정 채널 · ${it.name}" }
+                        ?: "지정 채널 (찾을 수 없어 마지막 채널로 재생)"
+                    else -> "재생 안 함"
+                },
+                onClick = { editStartup = true }
             )
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -127,6 +143,15 @@ fun SettingsScreen(
             guide = "XMLTV 형식(xmltv.xml) 파일 주소를 입력하세요. 비워두면 채널 설정 파일에 지정된 편성표나 기본 제공 편성표를 사용해요.",
             onDismiss = { editEpg = false },
             onSave = { onSaveEpg(it); editEpg = false }
+        )
+    }
+    if (editStartup) {
+        StartupDialog(
+            channels = channels,
+            currentMode = startupMode,
+            currentChannel = startupChannel,
+            onDismiss = { editStartup = false },
+            onSave = { mode, id -> onSaveStartup(mode, id); editStartup = false }
         )
     }
 }
@@ -225,6 +250,77 @@ private fun SourceDialog(
             }
         }
     )
+}
+
+@Composable
+private fun StartupDialog(
+    channels: List<Channel>,
+    currentMode: String,
+    currentChannel: String?,
+    onDismiss: () -> Unit,
+    onSave: (String, String?) -> Unit,
+) {
+    var mode by remember { mutableStateOf(currentMode) }
+    var chId by remember { mutableStateOf(currentChannel ?: channels.firstOrNull()?.id) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("시작 시 재생") },
+        text = {
+            Column {
+                Text(
+                    "앱을 켤 때와 차에서 블루투스 재생 버튼을 누를 때 재생할 채널이에요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                ModeOption("재생 안 함", mode == StartupSettings.MODE_NONE) { mode = StartupSettings.MODE_NONE }
+                ModeOption("마지막으로 들은 채널", mode == StartupSettings.MODE_LAST) { mode = StartupSettings.MODE_LAST }
+                ModeOption("지정 채널", mode == StartupSettings.MODE_FIXED) { mode = StartupSettings.MODE_FIXED }
+                if (mode == StartupSettings.MODE_FIXED) {
+                    Column(
+                        Modifier
+                            .heightIn(max = 260.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(start = 24.dp)
+                    ) {
+                        channels.forEach { ch ->
+                            ModeOption(ch.name, chId == ch.id) { chId = ch.id }
+                        }
+                    }
+                }
+                if (mode == StartupSettings.MODE_NONE) {
+                    Text(
+                        "재생 안 함이어도 블루투스 재생 버튼을 누르면 마지막 채널이 재생돼요.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = mode != StartupSettings.MODE_FIXED || chId != null,
+                onClick = { onSave(mode, if (mode == StartupSettings.MODE_FIXED) chId else null) }
+            ) { Text("저장") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+    )
+}
+
+@Composable
+private fun ModeOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
 }
 
 private val IconBackSettings =

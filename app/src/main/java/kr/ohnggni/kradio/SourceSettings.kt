@@ -39,3 +39,45 @@ object SourceSettings {
     /** 업데이트 다운로드 주소: 설정 파일의 updateUrl → 기본 드라이브 폴더 */
     fun updateUrl(): String = ChannelRepository.updateUrl ?: DEFAULT_UPDATE_URL
 }
+
+
+/** 시작 시 재생 설정 (앱을 새로 켤 때 + 블루투스 재생 버튼) */
+object StartupSettings {
+    const val MODE_NONE = "none"
+    const val MODE_LAST = "last"
+    const val MODE_FIXED = "fixed"
+
+    private const val KEY_MODE = "startup_mode"
+    private const val KEY_CHANNEL = "startup_channel"
+
+    private fun sp(c: Context) = c.getSharedPreferences(ChannelPrefs.PREFS, Context.MODE_PRIVATE)
+
+    fun mode(c: Context): String = sp(c).getString(KEY_MODE, MODE_NONE) ?: MODE_NONE
+    fun fixedChannel(c: Context): String? = sp(c).getString(KEY_CHANNEL, null)
+
+    fun save(c: Context, mode: String, channelId: String?) {
+        sp(c).edit().apply {
+            putString(KEY_MODE, mode)
+            if (channelId == null) remove(KEY_CHANNEL) else putString(KEY_CHANNEL, channelId)
+        }.apply()
+    }
+
+    private fun lastVisible(c: Context, visible: List<Channel>): String? =
+        sp(c).getString("last_channel", null)?.takeIf { id -> visible.any { it.id == id } }
+            ?: visible.firstOrNull()?.id
+
+    /** 지정 채널이 숨김·삭제됐으면 null */
+    private fun fixedVisible(c: Context, visible: List<Channel>): String? =
+        fixedChannel(c)?.takeIf { id -> visible.any { it.id == id } }
+
+    /** 앱을 새로 켤 때 재생할 채널 (null = 재생 안 함) */
+    fun launchChannelId(c: Context, visible: List<Channel>): String? = when (mode(c)) {
+        MODE_LAST -> lastVisible(c, visible)
+        MODE_FIXED -> fixedVisible(c, visible) ?: lastVisible(c, visible)
+        else -> null
+    }
+
+    /** 블루투스 재생 버튼(이어 듣기): 지정 채널이면 그 채널, 아니면 마지막 채널 */
+    fun resumeChannelId(c: Context, visible: List<Channel>): String? =
+        (if (mode(c) == MODE_FIXED) fixedVisible(c, visible) else null) ?: lastVisible(c, visible)
+}
