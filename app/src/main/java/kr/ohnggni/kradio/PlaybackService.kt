@@ -233,27 +233,40 @@ class PlaybackService : MediaSessionService() {
     // ---------------- 방송 정보 표시 ----------------
 
     /** 제목 = 채널명, 아티스트 = 현재 프로그램 (웹앱과 같은 배치). 소리 끊김 없이 표시 정보만 교체 */
+    /** 큐의 모든 채널에 현재 프로그램 표시 (제목 = 채널명, 아티스트 = 프로그램). 재생은 그대로 */
     private suspend fun updateNowPlaying() {
         try {
             val exo = exoPlayer ?: return
-            val item = exo.currentMediaItem ?: return
-            val ch = allChannels.firstOrNull { it.id == item.mediaId } ?: return
+            val count = exo.mediaItemCount
+            if (count == 0) return
 
             val epg = EpgRepository.load(this, SourceSettings.epgUrl(this))
-            val program = epg.display(ch.epg)
-            val artist = program?.let {
-                if (it.subTitle.isNullOrBlank()) it.title else "${it.title} · ${it.subTitle}"
-            } ?: ch.group
+            val byId = allChannels.associateBy { it.id }
+            var changed = false
 
-            val cur = item.mediaMetadata
-            if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist) return
+            val items = (0 until count).map { i ->
+                val item = exo.getMediaItemAt(i)
+                val ch = byId[item.mediaId] ?: return@map item
+                val program = epg.display(ch.epg)
+                val artist = program?.let {
+                    if (it.subTitle.isNullOrBlank()) it.title else "${it.title} · ${it.subTitle}"
+                } ?: ch.group
 
-            val updated = item.buildUpon()
-                .setMediaMetadata(cur.buildUpon().setTitle(ch.name).setArtist(artist).build())
-                .build()
-            // 스트림 주소가 같아서 재생은 그대로 두고 표시 정보만 바뀜
-            exo.replaceMediaItem(exo.currentMediaItemIndex, updated)
-            Log.i("KRadio", "방송 정보: ${ch.name} / $artist")
+                val cur = item.mediaMetadata
+                if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist) {
+                    item
+                } else {
+                    changed = true
+                    item.buildUpon()
+                        .setMediaMetadata(cur.buildUpon().setTitle(ch.name).setArtist(artist).build())
+                        .build()
+                }
+            }
+
+            if (!changed) return
+            // 모든 항목의 주소가 그대로라 재생 중인 채널도 끊기지 않고 표시 정보만 바뀜
+            exo.replaceMediaItems(0, count, items)
+            Log.i("KRadio", "방송 정보 갱신: ${count}개 채널")
         } catch (e: Exception) {
             Log.w("KRadio", "방송 정보 갱신 실패: ${e.message}")
         }
