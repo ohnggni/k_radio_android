@@ -354,6 +354,7 @@ class PlaybackService : MediaSessionService() {
             exo.addMediaItems(list.map { placeholderItem(it) })
         }
         Log.i("KRadio", "재생 목록 갱신: ${list.size}개")
+        updateNowPlaying()
     }
 
     /** 재생목록에 올릴 항목 (주소는 kradio:// 가짜 주소, 제목은 바로 표시) */
@@ -372,6 +373,30 @@ class PlaybackService : MediaSessionService() {
             builder.setMimeType(MimeTypes.APPLICATION_M3U8)
         }
         return builder.build()
+    }
+
+    /** 재생 항목에 방송 정보(프로그램명)와 로고(재생 시작 채널만)를 채움 */
+    private fun decoratedItem(ch: Channel, epg: EpgData?, withArt: Boolean): MediaItem {
+        val item = placeholderItem(ch)
+        val program = epg?.display(ch.epg)
+        val artist = program?.let {
+            if (it.subTitle.isNullOrBlank()) it.title else "${it.title} · ${it.subTitle}"
+        } ?: ch.group
+        val art = if (withArt) logoBytes(ch) else null
+        return item.buildUpon()
+            .setMediaMetadata(
+                item.mediaMetadata.buildUpon()
+                    .setArtist(artist)
+                    .setArtworkData(art, if (art != null) MediaMetadata.PICTURE_TYPE_FRONT_COVER else null)
+                    .build()
+            )
+            .build()
+    }
+
+    /** 재생 목록 전체를 방송 정보까지 채워서 생성 */
+    private suspend fun playlistItems(list: List<Channel>, startIdx: Int): List<MediaItem> {
+        val epg = runCatching { EpgRepository.load(this, SourceSettings.epgUrl(this)) }.getOrNull()
+        return list.mapIndexed { i, ch -> decoratedItem(ch, epg, i == startIdx) }
     }
 
     /** 플레이어가 주소를 열기 직전에 호출됨 (백그라운드 스레드) */
@@ -444,7 +469,7 @@ class PlaybackService : MediaSessionService() {
                     Log.i("KRadio", "재생목록 설정: ${list[idx].name}부터 (${list.size}개)")
                     future.set(
                         MediaSession.MediaItemsWithStartPosition(
-                            list.map { placeholderItem(it) }, idx, C.TIME_UNSET
+                            playlistItems(list, idx), idx, C.TIME_UNSET
                         )
                     )
                 } catch (e: Exception) {
@@ -487,12 +512,12 @@ class PlaybackService : MediaSessionService() {
             scope.launch {
                 try {
                     val list = getChannels()
-                    val lastId = prefs.getString("last_channel", null)
-                    val idx = list.indexOfFirst { it.id == lastId }.coerceAtLeast(0)
+                    val targetId = StartupSettings.resumeChannelId(this@PlaybackService, list)
+                    val idx = list.indexOfFirst { it.id == targetId }.coerceAtLeast(0)
                     Log.i("KRadio", "이어 듣기: ${list[idx].name}")
                     future.set(
                         MediaSession.MediaItemsWithStartPosition(
-                            list.map { placeholderItem(it) }, idx, C.TIME_UNSET
+                            playlistItems(list, idx), idx, C.TIME_UNSET
                         )
                     )
                 } catch (e: Exception) {
