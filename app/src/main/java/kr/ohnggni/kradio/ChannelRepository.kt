@@ -35,6 +35,14 @@ object ChannelRepository {
     var logoBase: String? = null
         private set
 
+    /** 설정 파일에 적힌 최신 앱 버전과 다운로드 주소 */
+    @Volatile var latestVersionCode: Long? = null
+        private set
+    @Volatile var latestVersionName: String? = null
+        private set
+    @Volatile var updateUrl: String? = null
+        private set
+
     /** 마지막 불러오기에서 원격 접속이 실패한 사유 (null = 성공) */
     @Volatile
     var lastError: String? = null
@@ -87,6 +95,9 @@ object ChannelRepository {
         val root = JSONObject(text)
         epgUrl = root.optString("epgUrl").ifEmpty { null }
         logoBase = root.optString("logoBase").ifEmpty { null }
+        latestVersionCode = root.optLong("latestVersionCode", 0L).takeIf { it > 0 }
+        latestVersionName = root.optString("latestVersionName").ifEmpty { null }
+        updateUrl = root.optString("updateUrl").ifEmpty { null }
         val headerSets = root.optJSONObject("headerSets")
         val arr = root.getJSONArray("channels")
         return (0 until arr.length()).map { i ->

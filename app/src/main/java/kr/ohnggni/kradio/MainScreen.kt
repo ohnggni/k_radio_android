@@ -54,6 +54,9 @@ fun MainScreen(
     onPrev: () -> Unit,
     onNext: () -> Unit,
     warning: String?,
+    updateNotice: String?,
+    onUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val current = channels.firstOrNull { it.id == currentId }
@@ -63,6 +66,7 @@ fun MainScreen(
             Column {
                 TopBanner(now, onOpenSettings)
                 warning?.let { WarningCard(it, onOpenSettings) }
+                updateNotice?.let { UpdateCard(it, onUpdate, onDismissUpdate) }
             }
         },
         bottomBar = {
@@ -110,6 +114,26 @@ private fun WarningCard(text: String, onSettings: () -> Unit) {
         ) {
             Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             TextButton(onClick = onSettings) { Text("설정") }
+        }
+    }
+}
+@Composable
+private fun UpdateCard(text: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Row(
+            Modifier.padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            TextButton(onClick = onDismiss) { Text("나중에") }
+            TextButton(onClick = onUpdate) { Text("받기") }
         }
     }
 }

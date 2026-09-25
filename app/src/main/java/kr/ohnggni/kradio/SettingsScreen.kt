@@ -27,6 +27,9 @@ fun SettingsScreen(
     onSaveConfig: (String?) -> Unit,
     onSaveEpg: (String?) -> Unit,
     onReload: () -> Unit,
+    appVersion: String,
+    newVersion: String?,
+    onOpenUpdate: () -> Unit,
 ) {
     var editConfig by remember { mutableStateOf(false) }
     var editEpg by remember { mutableStateOf(false) }
@@ -92,6 +95,18 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionTitle("앱 정보")
+            SettingRow(
+                title = "버전",
+                value = newVersion?.let { "$appVersion · 새 버전 $it 있음" } ?: appVersion,
+                onClick = onOpenUpdate
+            )
+            SettingRow(
+                title = "업데이트 받기",
+                value = "다운로드 폴더 열기",
+                onClick = onOpenUpdate
             )
         }
     }
