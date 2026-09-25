@@ -327,29 +327,46 @@ fun ChannelLogo(url: String?, name: String, modifier: Modifier = Modifier) {
 }
 
 /** 로고를 한 번 받아서 폰에 저장해두고 재사용 */
+/** 로고 불러오기: 앱 내장 로고 우선, 없으면 인터넷에서 받아 폰에 저장해두고 재사용 */
 object LogoCache {
+    const val ASSET_PREFIX = "asset:///"
+
     private val memory = ConcurrentHashMap<String, ImageBitmap>()
 
     suspend fun get(context: Context, url: String): ImageBitmap? =
         memory[url] ?: withContext(Dispatchers.IO) {
             runCatching {
-                val dir = File(context.cacheDir, "logos").apply { mkdirs() }
-                val file = File(dir, url.hashCode().toString())
-                if (!file.exists()) {
-                    val tmp = File(dir, file.name + ".tmp")
-                    val conn = URI(url).toURL().openConnection() as HttpURLConnection
-                    conn.connectTimeout = 5000
-                    conn.readTimeout = 10_000
-                    try {
-                        conn.inputStream.use { i -> tmp.outputStream().use { i.copyTo(it) } }
-                    } finally {
-                        conn.disconnect()
-                    }
-                    tmp.renameTo(file)
+                if (url.startsWith(ASSET_PREFIX)) {
+                    val path = url.removePrefix(ASSET_PREFIX)
+                    val bundled = runCatching {
+                        context.assets.open(path).use { BitmapFactory.decodeStream(it) }
+                    }.getOrNull()
+                    if (bundled != null) return@runCatching bundled.asImageBitmap()
+                    // 내장 로고가 없는 새 채널: 설정 파일의 logoBase 주소로 시도
+                    val base = ChannelRepository.logoBase ?: return@runCatching null
+                    return@runCatching download(context, base + path.substringAfterLast('/'))
                 }
-                BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+                download(context, url)
             }.getOrNull()?.also { memory[url] = it }
         }
+
+    private fun download(context: Context, url: String): ImageBitmap? {
+        val dir = File(context.cacheDir, "logos").apply { mkdirs() }
+        val file = File(dir, url.hashCode().toString())
+        if (!file.exists()) {
+            val tmp = File(dir, file.name + ".tmp")
+            val conn = URI(url).toURL().openConnection() as HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 10_000
+            try {
+                conn.inputStream.use { i -> tmp.outputStream().use { i.copyTo(it) } }
+            } finally {
+                conn.disconnect()
+            }
+            tmp.renameTo(file)
+        }
+        return BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+    }
 }
 
 // ---------------- 아이콘 (라이브러리 없이 직접 정의) ----------------
