@@ -30,6 +30,11 @@ object ChannelRepository {
     var epgUrl: String? = null
         private set
 
+    /** 설정 파일의 logoBase (내장 로고가 없을 때만 예비로 사용) */
+    @Volatile
+    var logoBase: String? = null
+        private set
+
     /** 마지막 불러오기에서 원격 접속이 실패한 사유 (null = 성공) */
     @Volatile
     var lastError: String? = null
@@ -81,7 +86,7 @@ object ChannelRepository {
     private fun parse(text: String): List<Channel> {
         val root = JSONObject(text)
         epgUrl = root.optString("epgUrl").ifEmpty { null }
-        val logoBase = root.optString("logoBase")
+        logoBase = root.optString("logoBase").ifEmpty { null }
         val headerSets = root.optJSONObject("headerSets")
         val arr = root.getJSONArray("channels")
         return (0 until arr.length()).map { i ->
@@ -90,8 +95,9 @@ object ChannelRepository {
             val h = if (setName.isNotEmpty()) headerSets?.optJSONObject(setName) else null
             val headers = h?.keys()?.asSequence()?.associateWith { h.getString(it) } ?: emptyMap()
             val ex = o.optJSONObject("extract")
+            // 파일 이름이면 앱 내장 로고, http로 시작하면 인터넷 주소
             val logo = o.optString("logo").ifEmpty { null }?.let {
-                if (it.startsWith("http")) it else logoBase + it
+                if (it.startsWith("http")) it else "${LogoCache.ASSET_PREFIX}logos/$it"
             }
             Channel(
                 id = o.getString("id"),

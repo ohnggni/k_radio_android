@@ -42,6 +42,8 @@ private const val SCHEME = "kradio"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
 private const val MAX_RETRY_DELAY_MS = 30_000L       // 재연결 최대 대기 간격
 
+private const val BASE_REFRESH_MS = 30 * 60 * 1000L    // 채널 설정 30분마다 새로 확인
+
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
 
@@ -52,6 +54,9 @@ class PlaybackService : MediaSessionService() {
     // GitHub 기본 채널 (한 번 받아서 재사용)
     @Volatile
     private var baseChannels: List<Channel>? = null
+
+    @Volatile
+    private var baseLoadedAt = 0L
 
     // 사용자 설정이 반영된 전체 채널 (숨김 포함, 주소 해석용)
     @Volatile
@@ -211,6 +216,9 @@ class PlaybackService : MediaSessionService() {
         Log.w("KRadio", "재연결 예약: ${delayMs}ms 후 (${retryCount}번째) - $reason")
         retryJob = scope.launch {
             delay(delayMs)
+            // 방송사 주소가 바뀌어 끊겼을 수 있으니 채널 설정도 새로 받아서 반영
+            refreshBase(force = true)
+            runCatching { getChannels() }
             retryNow()
         }
     }
@@ -274,9 +282,20 @@ class PlaybackService : MediaSessionService() {
 
     // ---------------- 채널 → 재생 항목 ----------------
 
+    /** 채널 설정을 새로 받음 (30분이 지났거나 force일 때만). 실패하면 기존 설정 유지 */
+    private suspend fun refreshBase(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && baseChannels != null && now - baseLoadedAt < BASE_REFRESH_MS) return
+        runCatching { ChannelRepository.load(this) }.onSuccess {
+            baseChannels = it
+            baseLoadedAt = now
+        }
+    }
+
     /** 재생 목록용 채널 (사용자 순서, 숨김 제외) */
     private suspend fun getChannels(): List<Channel> {
-        val base = baseChannels ?: ChannelRepository.load(this).also { baseChannels = it }
+        refreshBase()
+        val base = baseChannels ?: error("채널 설정을 불러올 수 없음")
         val p = ChannelPrefs.read(this)
         val all = ChannelPrefs.applyOrder(base, p)
         allChannels = all
@@ -289,7 +308,7 @@ class PlaybackService : MediaSessionService() {
         if (exo.mediaItemCount == 0) return   // 재생 목록이 없으면 갱신할 것도 없음
 
         // 설정이 바뀌었으니 출처에서 새로 받고, 해석해둔 주소 캐시도 비움
-        baseChannels = runCatching { ChannelRepository.load(this) }.getOrNull() ?: baseChannels
+        refreshBase(force = true)
         resolvedCache.clear()
 
         // 불러오기에 실패해도 앱이 죽지 않고 지금 재생은 그대로 유지
@@ -390,10 +409,15 @@ class PlaybackService : MediaSessionService() {
             val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
             scope.launch {
                 try {
-                    val list = getChannels()
+                    var list = getChannels()
                     val requested = mediaItems.getOrNull(
                         if (startIndex == C.INDEX_UNSET) 0 else startIndex
                     )?.mediaId
+                    if (requested != null && list.none { it.id == requested }) {
+                        // 화면엔 있는데 서비스가 모르는 채널 = 설정이 바뀐 것 → 새로 받기
+                        refreshBase(force = true)
+                        list = getChannels()
+                    }
                     val idx = list.indexOfFirst { it.id == requested }.coerceAtLeast(0)
                     Log.i("KRadio", "재생목록 설정: ${list[idx].name}부터 (${list.size}개)")
                     future.set(
