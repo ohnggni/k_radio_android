@@ -23,6 +23,9 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kr.ohnggni.kradio.ui.theme.KRadioTheme
+import android.content.Intent
+import android.net.Uri
+import androidx.core.content.pm.PackageInfoCompat
 
 private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE }
 
@@ -48,9 +51,18 @@ class MainActivity : ComponentActivity() {
     private var customConfig by mutableStateOf<String?>(null)
     private var customEpg by mutableStateOf<String?>(null)
 
+    private var appVersionName = ""
+    private var appVersionCode = 0L
+    private var newVersion by mutableStateOf<String?>(null)    // 설치된 것보다 새 버전 이름
+    private var updateNotice by mutableStateOf<String?>(null)  // 메인 화면 안내 카드
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        packageManager.getPackageInfo(packageName, 0).let {
+            appVersionName = it.versionName.orEmpty()
+            appVersionCode = PackageInfoCompat.getLongVersionCode(it)
+        }
 
         customConfig = SourceSettings.customConfigUrl(this)
         customEpg = SourceSettings.customEpgUrl(this)
@@ -64,6 +76,7 @@ class MainActivity : ComponentActivity() {
                 status = "채널 정보를 불러올 수 없어요"
             }
             updateWarning()
+            updateUpdateInfo()
 
             // 화면이 보이는 동안 매 분 정각마다 편성 정보 갱신
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -96,6 +109,9 @@ class MainActivity : ComponentActivity() {
                         onPrev = { controller?.seekToPrevious() },
                         onNext = { controller?.seekToNext() },
                         warning = warning,
+                        updateNotice = updateNotice,
+                        onUpdate = { openUpdate() },
+                        onDismissUpdate = { dismissUpdate() },
                         onOpenSettings = { screen = Screen.SETTINGS },
                     )
 
@@ -119,6 +135,9 @@ class MainActivity : ComponentActivity() {
                             reloadSources()
                         },
                         onReload = { reloadSources() },
+                        appVersion = appVersionName,
+                        newVersion = newVersion,
+                        onOpenUpdate = { openUpdate() },
                     )
 
                     Screen.MANAGE -> ChannelManageScreen(
@@ -191,6 +210,7 @@ class MainActivity : ComponentActivity() {
             epg = EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity), force = true)
             now = System.currentTimeMillis()
             updateWarning()
+            updateUpdateInfo()
             reloading = false
         }
     }
@@ -215,7 +235,35 @@ class MainActivity : ComponentActivity() {
             "$what 서버(직접 지정한 주소)에 연결할 수 없어요. 설정에서 주소를 확인해 주세요."
         }
     }
+    // ---------------- 업데이트 ----------------
 
+    /** 설정 파일의 최신 버전과 비교해서 안내 여부 결정 */
+    private fun updateUpdateInfo() {
+        val latest = ChannelRepository.latestVersionCode
+        newVersion = if (latest != null && latest > appVersionCode) {
+            ChannelRepository.latestVersionName ?: "새 버전"
+        } else null
+        val dismissed = getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
+            .getLong("dismissed_update", 0L)
+        updateNotice = if (newVersion != null && latest != dismissed) {
+            "새 버전 ${newVersion}이 나왔어요"
+        } else null
+    }
+
+    private fun openUpdate() {
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SourceSettings.updateUrl())))
+        }
+    }
+
+    /** '나중에': 이 버전에 대해서는 다시 안내하지 않음 (더 새 버전이 나오면 다시 표시) */
+    private fun dismissUpdate() {
+        ChannelRepository.latestVersionCode?.let {
+            getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
+                .edit().putLong("dismissed_update", it).apply()
+        }
+        updateNotice = null
+    }
     // ---------------- 채널 설정 ----------------
 
     /** 저장하면 서비스가 감지해서 재생 목록에 바로 반영 */
