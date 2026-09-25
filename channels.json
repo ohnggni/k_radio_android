@@ -73,7 +73,7 @@
       "epg": "815468.naver", "logo": "tbs.png",
       "url": "https://cdnfm.tbs.seoul.kr/tbs/_definst_/tbs_fm_web_360.smil/playlist.m3u8" },
     { "id": "tbnfm",        "name": "TBN 경인",   "group": "기타", "type": "direct",
-      "logo": "tbn.png",
+      "epg": "라디오 TBN(경인).daum", "logo": "tbn.png",
       "url": "http://radio2.tbn.or.kr:1935/gyeongin/myStream/playlist.m3u8" },
     { "id": "ifm",          "name": "경인방송 iFM", "group": "기타", "type": "direct",
       "epg": "1974895.naver", "logo": "itv.png",
