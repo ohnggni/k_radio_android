@@ -75,6 +75,9 @@ class PlaybackService : MediaSessionService() {
     private var retryJob: Job? = null
     private var retryCount = 0
 
+    // 알림·잠금화면·워치·차량에 보낼 방송 정보 갱신용
+    private var nowPlayingJob: Job? = null
+
     // 네트워크 복구 감지
     private val connectivity by lazy { getSystemService(ConnectivityManager::class.java) }
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -120,9 +123,12 @@ class PlaybackService : MediaSessionService() {
 
         exo.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                // 채널이 바뀌면 마지막 채널로 기록하고, 이전 채널 재연결 시도는 취소
                 mediaItem?.mediaId?.let { prefs.edit().putString("last_channel", it).apply() }
-                cancelRetry()
+                // 방송 정보만 바뀐 경우(PLAYLIST_CHANGED)는 재연결 시도를 취소하지 않음
+                if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                    cancelRetry()
+                    scope.launch { updateNowPlaying() }
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -183,6 +189,15 @@ class PlaybackService : MediaSessionService() {
         runCatching { connectivity.registerDefaultNetworkCallback(networkCallback) }
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
             .registerOnSharedPreferenceChangeListener(prefsListener)
+
+        // 매분 정각마다 현재 방송 정보 갱신
+        nowPlayingJob = scope.launch {
+            while (true) {
+                updateNowPlaying()
+                val now = System.currentTimeMillis()
+                delay(60_000L - now % 60_000L + 1_000L)
+            }
+        }
     }
 
     // ---------------- 자동 재연결 ----------------
@@ -213,6 +228,35 @@ class PlaybackService : MediaSessionService() {
         retryJob?.cancel()
         retryJob = null
         retryCount = 0
+    }
+
+    // ---------------- 방송 정보 표시 ----------------
+
+    /** 제목 = 채널명, 아티스트 = 현재 프로그램 (웹앱과 같은 배치). 소리 끊김 없이 표시 정보만 교체 */
+    private suspend fun updateNowPlaying() {
+        try {
+            val exo = exoPlayer ?: return
+            val item = exo.currentMediaItem ?: return
+            val ch = allChannels.firstOrNull { it.id == item.mediaId } ?: return
+
+            val epg = EpgRepository.load(this, SourceSettings.epgUrl(this))
+            val program = epg.display(ch.epg)
+            val artist = program?.let {
+                if (it.subTitle.isNullOrBlank()) it.title else "${it.title} · ${it.subTitle}"
+            } ?: ch.group
+
+            val cur = item.mediaMetadata
+            if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist) return
+
+            val updated = item.buildUpon()
+                .setMediaMetadata(cur.buildUpon().setTitle(ch.name).setArtist(artist).build())
+                .build()
+            // 스트림 주소가 같아서 재생은 그대로 두고 표시 정보만 바뀜
+            exo.replaceMediaItem(exo.currentMediaItemIndex, updated)
+            Log.i("KRadio", "방송 정보: ${ch.name} / $artist")
+        } catch (e: Exception) {
+            Log.w("KRadio", "방송 정보 갱신 실패: ${e.message}")
+        }
     }
 
     // ---------------- 채널 → 재생 항목 ----------------
