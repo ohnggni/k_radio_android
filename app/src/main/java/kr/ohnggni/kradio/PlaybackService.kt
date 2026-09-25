@@ -83,6 +83,17 @@ class PlaybackService : MediaSessionService() {
     // 알림·잠금화면·워치·차량에 보낼 방송 정보 갱신용
     private var nowPlayingJob: Job? = null
 
+    // 내장 로고 이미지 데이터 (워치 등 외부 기기는 앱 내부 파일을 못 읽어서 데이터로 전달)
+    private val logoBytesCache = ConcurrentHashMap<String, ByteArray>()
+
+    private fun logoBytes(ch: Channel): ByteArray? {
+        val logo = ch.logo ?: return null
+        if (!logo.startsWith(LogoCache.ASSET_PREFIX)) return null
+        return logoBytesCache[logo] ?: runCatching {
+            assets.open(logo.removePrefix(LogoCache.ASSET_PREFIX)).use { it.readBytes() }
+        }.getOrNull()?.also { logoBytesCache[logo] = it }
+    }
+
     // 네트워크 복구 감지
     private val connectivity by lazy { getSystemService(ConnectivityManager::class.java) }
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -242,11 +253,13 @@ class PlaybackService : MediaSessionService() {
 
     /** 제목 = 채널명, 아티스트 = 현재 프로그램 (웹앱과 같은 배치). 소리 끊김 없이 표시 정보만 교체 */
     /** 큐의 모든 채널에 현재 프로그램 표시 (제목 = 채널명, 아티스트 = 프로그램). 재생은 그대로 */
+    /** 큐의 모든 채널에 현재 프로그램 표시 + 재생 중 채널에만 로고 이미지 첨부. 재생은 그대로 */
     private suspend fun updateNowPlaying() {
         try {
             val exo = exoPlayer ?: return
             val count = exo.mediaItemCount
             if (count == 0) return
+            val currentIdx = exo.currentMediaItemIndex
 
             val epg = EpgRepository.load(this, SourceSettings.epgUrl(this))
             val byId = allChannels.associateBy { it.id }
@@ -259,14 +272,23 @@ class PlaybackService : MediaSessionService() {
                 val artist = program?.let {
                     if (it.subTitle.isNullOrBlank()) it.title else "${it.title} · ${it.subTitle}"
                 } ?: ch.group
+                val wantArt = if (i == currentIdx) logoBytes(ch) else null
 
                 val cur = item.mediaMetadata
-                if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist) {
+                val artSame = (cur.artworkData == null && wantArt == null) ||
+                        (cur.artworkData != null && wantArt != null && cur.artworkData.contentEquals(wantArt))
+                if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist && artSame) {
                     item
                 } else {
                     changed = true
                     item.buildUpon()
-                        .setMediaMetadata(cur.buildUpon().setTitle(ch.name).setArtist(artist).build())
+                        .setMediaMetadata(
+                            cur.buildUpon()
+                                .setTitle(ch.name)
+                                .setArtist(artist)
+                                .setArtworkData(wantArt, if (wantArt != null) MediaMetadata.PICTURE_TYPE_FRONT_COVER else null)
+                                .build()
+                        )
                         .build()
                 }
             }
