@@ -120,7 +120,6 @@ private fun TopBanner(now: Long, onSettings: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .statusBarsPadding()                     // 상태표시줄은 침범하지 않고
-            .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)) // 아래쪽만 둥글게
             .background(
                 Brush.horizontalGradient(listOf(cs.primaryContainer, cs.secondaryContainer))
             )
@@ -226,7 +225,6 @@ private fun PlayerBar(
     Surface(
         color = container,
         contentColor = onContainer,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
         shadowElevation = 12.dp,
     ) {
         Row(
