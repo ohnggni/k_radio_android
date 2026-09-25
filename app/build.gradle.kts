@@ -37,6 +37,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"   // 정식 버전과 별도 앱으로 설치
+            versionNameSuffix = "-dev"
+        }
         release {
             signingConfig = signingConfigs.getByName("release")
             optimization {
