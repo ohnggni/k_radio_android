@@ -159,8 +159,11 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                // 사용자가 정지하면 재연결 중단
-                if (!playWhenReady) cancelRetry()
+                if (!playWhenReady) {
+                    // 사용자가 정지하면 재연결 중단 + 정지 시각 기록 (다음 실행 시 자동 재생 판단용)
+                    cancelRetry()
+                    prefs.edit().putLong("stopped_at", System.currentTimeMillis()).apply()
+                }
             }
         })
 
