@@ -269,7 +269,8 @@ private fun StartupDialog(
         text = {
             Column {
                 Text(
-                    "앱을 켤 때와 차에서 블루투스 재생 버튼을 누를 때 재생할 채널이에요.",
+                    "앱을 켤 때와 차에서 블루투스 재생 버튼을 누를 때 재생할 채널이에요.\n" +
+                            "정지한 지 ${StartupSettings.AUTO_START_IDLE_MS / 60_000}분이 지난 뒤 앱을 다시 열어도 새로 켠 것으로 보고 재생해요.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
