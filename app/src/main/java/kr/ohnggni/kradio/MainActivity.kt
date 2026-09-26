@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kr.ohnggni.kradio.ui.theme.KRadioTheme
 
 private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE }
+private const val AUTO_START_IDLE_MS = 10 * 60 * 1000L  // 정지 후 이 시간이 지나면 새로 켠 것으로 봄
 
 class MainActivity : ComponentActivity() {
 
@@ -58,7 +59,8 @@ class MainActivity : ComponentActivity() {
 
     private var startupMode by mutableStateOf(StartupSettings.MODE_NONE)
     private var startupChannel by mutableStateOf<String?>(null)
-    private var pendingAutoStart = false   // 앱을 새로 켰을 때만 true
+    private var pendingAutoStart = false   // 앱이 앞으로 나올 때 true
+    private var recreated = false          // 폴드·회전으로 화면만 다시 만들어진 경우
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,7 +71,7 @@ class MainActivity : ComponentActivity() {
         }
 
         // 폴드 접기/펴기 등으로 화면만 다시 만들어질 때는 자동 재생하지 않음
-        pendingAutoStart = savedInstanceState == null
+        recreated = savedInstanceState != null
         startupMode = StartupSettings.mode(this)
         startupChannel = StartupSettings.fixedChannel(this)
 
@@ -184,6 +186,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // 폴드·회전으로 다시 만들어진 경우만 빼고, 앱이 앞으로 나올 때마다 자동 재생 여부 판단
+        pendingAutoStart = !recreated
+        recreated = false
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
         controllerFuture = future
@@ -347,12 +352,20 @@ class MainActivity : ComponentActivity() {
 
     // ---------------- 재생 ----------------
     /** 앱을 새로 켰을 때 설정에 따라 자동 재생 (이미 재생 중이면 그대로 둠) */
+    /** 앱이 앞으로 나왔을 때 설정에 따라 자동 재생 */
     private fun tryAutoStart() {
         if (!pendingAutoStart) return
         val c = controller ?: return
         if (channels.isEmpty()) return
         pendingAutoStart = false
-        if (c.playWhenReady) return
+        if (c.playWhenReady) return   // 재생 중이면 그대로
+
+        // 재생 서비스가 새로 시작됐거나(목록 없음) 정지한 지 오래됐을 때만 '새로 켠 것'으로 봄
+        val stoppedAt = getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE).getLong("stopped_at", 0L)
+        val fresh = c.mediaItemCount == 0
+        val longIdle = System.currentTimeMillis() - stoppedAt > AUTO_START_IDLE_MS
+        if (!fresh && !longIdle) return
+
         val id = StartupSettings.launchChannelId(this, channels) ?: return
         channels.firstOrNull { it.id == id }?.let { playChannel(it) }
     }
