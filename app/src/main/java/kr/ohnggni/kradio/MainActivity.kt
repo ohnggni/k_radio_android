@@ -28,7 +28,6 @@ import kotlinx.coroutines.launch
 import kr.ohnggni.kradio.ui.theme.KRadioTheme
 
 private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE }
-private const val AUTO_START_IDLE_MS = 10 * 60 * 1000L  // 정지 후 이 시간이 지나면 새로 켠 것으로 봄
 
 class MainActivity : ComponentActivity() {
 
@@ -363,7 +362,7 @@ class MainActivity : ComponentActivity() {
         // 재생 서비스가 새로 시작됐거나(목록 없음) 정지한 지 오래됐을 때만 '새로 켠 것'으로 봄
         val stoppedAt = getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE).getLong("stopped_at", 0L)
         val fresh = c.mediaItemCount == 0
-        val longIdle = System.currentTimeMillis() - stoppedAt > AUTO_START_IDLE_MS
+        val longIdle = System.currentTimeMillis() - stoppedAt > StartupSettings.AUTO_START_IDLE_MS
         if (!fresh && !longIdle) return
 
         val id = StartupSettings.launchChannelId(this, channels) ?: return

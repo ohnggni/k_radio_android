@@ -47,6 +47,9 @@ object StartupSettings {
     const val MODE_LAST = "last"
     const val MODE_FIXED = "fixed"
 
+    /** 정지 후 이 시간이 지나 앱을 다시 열면 새로 켠 것으로 보고 자동 재생 */
+    const val AUTO_START_IDLE_MS = 10 * 60 * 1000L
+
     private const val KEY_MODE = "startup_mode"
     private const val KEY_CHANNEL = "startup_channel"
 
