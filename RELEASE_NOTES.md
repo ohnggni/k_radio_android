@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.0.3 (Unreleased)
+## 1.0.3 (2026-09-26)
 
 ### New
 - **Startup playback setting** (Settings → Startup playback): Off / Last channel / Fixed channel.
