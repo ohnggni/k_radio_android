@@ -4,6 +4,14 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.0.4 (Unreleased)
+
+### Improved
+- Startup playback now also applies when returning to the app after playback has been stopped for 10 minutes or more (e.g. after the playback notification has disappeared), not only after the app was swiped away.
+- Short pauses under 10 minutes and screen recreation (folding/unfolding) do not trigger startup playback.
+
+---
+
 ## 1.0.3 (2026-09-26)
 
 ### New
