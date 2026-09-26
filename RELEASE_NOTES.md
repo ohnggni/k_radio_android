@@ -13,6 +13,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
   - The play button in the player bar follows the same setting when nothing is queued.
   - If the fixed channel is hidden or deleted, the last channel is used instead.
   - The channel picker reflects channel management (hidden channels excluded, custom channels included, user order).
+  - App name is shown in Korean on devices set to Korean, so voice assistants can find the app by its spoken name.
 
 ### Fixed
 - Program info and logo were not shown in the notification, lock screen and watch until the next minute after starting playback. They now appear immediately.
