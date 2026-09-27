@@ -4,6 +4,17 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.1.0 (Unreleased)
+
+### New
+- **Auto-off timer** (moon button in the player bar): stop playback after 15/30/45/60/90 minutes, at a chosen time, or when one of the next programs on the current channel ends (up to 4, multi-part programs listed separately).
+  - Fades out over 10 seconds before stopping.
+  - Keeps running with the screen off and across channel changes.
+  - Cancelled when playback is stopped manually.
+- Remaining time is shown in the player bar.
+
+---
+
 ## 1.0.4 (2026-09-26)
 
 ### Improved
