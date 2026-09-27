@@ -3,6 +3,7 @@
 # 사용법: ./scripts/release.sh 1.1.0
 # 전제: RELEASE_NOTES.md에 "## <버전> (Unreleased)" 항목이 있어야 함
 set -euo pipefail
+trap 'echo "   ❌ 중단됨 (release.sh $LINENO번째 줄)"' ERR
 
 VER="${1:?버전을 입력하세요. 예: ./scripts/release.sh 1.1.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,7 +37,7 @@ echo "▶ 2. 정식 빌드 + 검증"
 mkdir -p "$OUT_DIR"
 cp app/build/outputs/apk/release/app-release.apk "$APK"
 BT=$(ls -d "$HOME/Library/Android/sdk/build-tools/"* | tail -1)
-BADGE=$("$BT/aapt2" dump badging "$APK" | head -1)
+BADGE=$("$BT/aapt2" dump badging "$APK" 2>/dev/null | head -1 || true)
 echo "$BADGE" | grep -q "versionCode='$NEW_CODE' versionName='$VER'" || {
   echo "   APK 버전 불일치: $BADGE"; exit 1; }
 "$BT/apksigner" verify "$APK" 2>/dev/null || { echo "   서명 확인 실패"; exit 1; }
