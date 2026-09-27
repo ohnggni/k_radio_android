@@ -3,6 +3,8 @@ package kr.ohnggni.kradio
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -47,29 +49,33 @@ object ChannelRepository {
     @Volatile
     var lastError: String? = null
         private set
+    private val loadLock = Mutex()
 
     /** 원격 설정을 받아오고, 실패하면 이 주소로 마지막에 저장해둔 설정을 사용 */
     suspend fun load(context: Context): List<Channel> = withContext(Dispatchers.IO) {
-        val url = SourceSettings.configUrl(context)
-        val cache = File(context.filesDir, "channels_cache_${url.hashCode()}.json")
+        loadLock.withLock {
+            val url = SourceSettings.configUrl(context)
+            val cache = File(context.filesDir, "channels_cache_${url.hashCode()}.json")
 
-        val remote = runCatching { httpGet(url, emptyMap()) }
-        val remoteText = remote.getOrNull()?.takeIf { t -> runCatching { parse(t) }.isSuccess }
-        lastError = when {
-            remoteText != null -> null
-            remote.isFailure -> remote.exceptionOrNull()?.message ?: "연결 실패"
-            else -> "설정 파일 형식이 올바르지 않음"
-        }
-
-        val text = when {
-            remoteText != null -> {
-                cache.writeText(remoteText)
-                remoteText
+            val remote = runCatching { httpGet(url, emptyMap()) }
+            val remoteText = remote.getOrNull()?.takeIf { t -> runCatching { parse(t) }.isSuccess }
+            lastError = when {
+                remoteText != null -> null
+                remote.isFailure -> remote.exceptionOrNull()?.message ?: "연결 실패"
+                else -> "설정 파일 형식이 올바르지 않음"
             }
-            cache.exists() -> cache.readText()
-            else -> error("채널 설정을 불러올 수 없음")
+
+            val text = when {
+                remoteText != null -> {
+                    cache.writeText(remoteText)
+                    remoteText
+                }
+
+                cache.exists() -> cache.readText()
+                else -> error("채널 설정을 불러올 수 없음")
+            }
+            parse(text)
         }
-        parse(text)
     }
 
     /** 채널 하나를 실제 재생 가능한 m3u8 주소로 변환 */

@@ -26,6 +26,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kr.ohnggni.kradio.ui.theme.KRadioTheme
+import android.content.SharedPreferences
 
 private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE }
 
@@ -62,6 +63,10 @@ class MainActivity : ComponentActivity() {
     private var recreated = false          // 폴드·회전으로 화면만 다시 만들어진 경우
     private var sleepAt by mutableStateOf<Long?>(null)
     private var showSleep by mutableStateOf(false)
+    // 꺼짐 예약 값이 바뀌면(설정·취소·종료) 즉시 재생기 표시에 반영
+    private val sleepPrefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == SleepTimer.KEY) sleepAt = SleepTimer.get(this)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -207,6 +212,8 @@ class MainActivity : ComponentActivity() {
         pendingAutoStart = !recreated
         recreated = false
         sleepAt = SleepTimer.get(this)
+        getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
+            .registerOnSharedPreferenceChangeListener(sleepPrefListener)
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
         controllerFuture = future
@@ -237,6 +244,8 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controller = null
+        getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
+            .unregisterOnSharedPreferenceChangeListener(sleepPrefListener)
         super.onStop()
     }
 
