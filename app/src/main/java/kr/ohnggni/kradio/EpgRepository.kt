@@ -5,6 +5,8 @@ import android.util.Log
 import android.util.Xml
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
 import java.net.HttpURLConnection
@@ -59,6 +61,8 @@ object EpgRepository {
     @Volatile private var memoryLoadedAt = 0L
 
     @Volatile private var memoryUrl: String? = null
+    // 화면과 재생 서비스가 동시에 받으려 할 때 한 번에 하나씩만 (임시 파일 충돌 방지)
+    private val loadLock = Mutex()
 
     /** 마지막 다운로드 실패 사유 (null = 성공) */
     @Volatile
@@ -67,33 +71,36 @@ object EpgRepository {
 
     suspend fun load(context: Context, url: String?, force: Boolean = false): EpgData =
         withContext(Dispatchers.IO) {
-            val now = System.currentTimeMillis()
-            memory?.let {
-                if (!force && url == memoryUrl && now - memoryLoadedAt < REFRESH_MS) return@withContext it
-            }
-
-            val cache = File(context.filesDir, "epg_cache_${url.hashCode()}.xml")
-            val cacheFresh = cache.exists() && now - cache.lastModified() < REFRESH_MS
-            if ((force || !cacheFresh) && url != null) {
-                runCatching { download(url, cache) }
-                    .onSuccess { lastError = null }
-                    .onFailure {
-                        lastError = it.message ?: "연결 실패"
-                        Log.w("KRadio", "EPG 다운로드 실패: ${it.message}")
-                    }
-            }
-
-            val data = if (cache.exists()) {
-                runCatching { parse(cache) }.getOrElse {
-                    Log.w("KRadio", "EPG 파싱 실패: ${it.message}")
-                    EpgData(emptyMap())
+            loadLock.withLock {
+                val now = System.currentTimeMillis()
+                memory?.let {
+                    // 먼저 온 쪽이 방금 받아뒀으면 그대로 사용
+                    if (!force && url == memoryUrl && now - memoryLoadedAt < REFRESH_MS) return@withLock it
                 }
-            } else EpgData(emptyMap())
 
-            memory = data
-            memoryLoadedAt = now
-            memoryUrl = url
-            data
+                val cache = File(context.filesDir, "epg_cache_${url.hashCode()}.xml")
+                val cacheFresh = cache.exists() && now - cache.lastModified() < REFRESH_MS
+                if ((force || !cacheFresh) && url != null) {
+                    runCatching { download(url, cache) }
+                        .onSuccess { lastError = null }
+                        .onFailure {
+                            lastError = it.message ?: "연결 실패"
+                            Log.w("KRadio", "EPG 다운로드 실패: ${it.message}")
+                        }
+                }
+
+                val data = if (cache.exists()) {
+                    runCatching { parse(cache) }.getOrElse {
+                        Log.w("KRadio", "EPG 파싱 실패: ${it.message}")
+                        EpgData(emptyMap())
+                    }
+                } else EpgData(emptyMap())
+
+                memory = data
+                memoryLoadedAt = now
+                memoryUrl = url
+                data
+            }
         }
 
     private fun download(url: String, dest: File) {
