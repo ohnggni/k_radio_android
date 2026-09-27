@@ -134,6 +134,9 @@ class MainActivity : ComponentActivity() {
                         if (showSleep) {
                             SleepTimerDialog(
                                 sleepAt = sleepAt,
+                                programs = channels.firstOrNull { it.id == currentId }
+                                    ?.let { ch -> epg?.upcoming(ch.epg, System.currentTimeMillis()) }
+                                    ?: emptyList(),
                                 onSetAt = { setSleep(it) },
                                 onCancelTimer = { setSleep(null) },
                                 onDismiss = { showSleep = false },

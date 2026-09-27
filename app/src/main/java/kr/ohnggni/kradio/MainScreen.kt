@@ -300,7 +300,7 @@ private fun PlayerBar(
             IconButton(onClick = onOpenSleep, enabled = enabled && isOn) {
                 Icon(
                     IconSleep,
-                    contentDescription = "취침 타이머",
+                    contentDescription = "꺼짐 예약",
                     tint = if (sleepAt != null) MaterialTheme.colorScheme.primary else LocalContentColor.current
                 )
             }
@@ -436,9 +436,9 @@ private val IconSettings = svgIcon(
 private fun sleepRemainLabel(at: Long, now: Long): String {
     val min = ((at - now) / 60_000L).coerceAtLeast(0)
     return when {
-        min < 1 -> "곧 종료"
-        min < 60 -> "${min}분 후 종료"
-        else -> "${min / 60}시간 ${min % 60}분 후 종료"
+        min < 1 -> "곧 꺼짐"
+        min < 60 -> "${min}분 후 꺼짐"
+        else -> "${min / 60}시간 ${min % 60}분 후 꺼짐"
     }
 }
 

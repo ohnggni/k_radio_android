@@ -42,6 +42,11 @@ class EpgData(private val byChannel: Map<String, List<Program>>) {
             ?.let { return it }
         return list.drop(idx + 1).firstOrNull { it.stop - it.start >= SHORT_MS } ?: cur
     }
+    /** 취침 타이머용: 지금부터 이어지는 본 프로그램 최대 count개 (짧은 편성 제외) */
+    fun upcoming(epgId: String?, now: Long = System.currentTimeMillis(), count: Int = 4): List<Program> {
+        val list = epgId?.let { byChannel[it] } ?: return emptyList()
+        return list.filter { it.stop > now && it.stop - it.start >= SHORT_MS }.take(count)
+    }
     val isEmpty: Boolean get() = byChannel.isEmpty()
 }
 
