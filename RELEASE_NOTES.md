@@ -4,6 +4,14 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.1.1 (Unreleased)
+
+### Fixed
+- A program guide connection warning could appear right after launching the app (typically after an update), even though the guide loaded correctly. The screen and the playback service no longer download the guide at the same time; channel config loading is serialized the same way.
+- The remaining time of the auto-off timer stayed on the player bar for up to a minute after stopping playback. It now disappears immediately, including when stopped from the notification or a watch.
+
+---
+
 ## 1.1.0 (2026-09-27)
 
 ### New
