@@ -63,8 +63,10 @@ class PlaybackService : MediaSessionService() {
     private var allChannels: List<Channel> = emptyList()
 
     // 채널 관리 화면에서 설정을 바꾸면 재생 목록에 바로 반영
+    // 채널 관리·출처·타이머 설정이 바뀌면 바로 반영
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ChannelPrefs.KEY || key == SourceSettings.KEY_CONFIG) scope.launch { refreshPlaylist() }
+        if (key == SleepTimer.KEY) scheduleSleep()
     }
 
     // 스트림 서버(호스트)별로 붙일 헤더 (Referer 등)
@@ -82,6 +84,10 @@ class PlaybackService : MediaSessionService() {
 
     // 알림·잠금화면·워치·차량에 보낼 방송 정보 갱신용
     private var nowPlayingJob: Job? = null
+
+    // 취침 타이머
+    private var sleepJob: Job? = null
+    private var fadingOut = false
 
     // 내장 로고 이미지 데이터 (워치 등 외부 기기는 앱 내부 파일을 못 읽어서 데이터로 전달)
     private val logoBytesCache = ConcurrentHashMap<String, ByteArray>()
@@ -163,6 +169,10 @@ class PlaybackService : MediaSessionService() {
                     // 사용자가 정지하면 재연결 중단 + 정지 시각 기록 (다음 실행 시 자동 재생 판단용)
                     cancelRetry()
                     prefs.edit().putLong("stopped_at", System.currentTimeMillis()).apply()
+                    // 직접 정지하면 취침 타이머도 취소 (전화 수신 등 자동 일시정지는 유지)
+                    if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST && !fadingOut) {
+                        SleepTimer.set(this@PlaybackService, null)
+                    }
                 }
             }
         })
@@ -217,6 +227,7 @@ class PlaybackService : MediaSessionService() {
                 delay(60_000L - now % 60_000L + 1_000L)
             }
         }
+        scheduleSleep()
     }
 
     // ---------------- 자동 재연결 ----------------
@@ -250,6 +261,42 @@ class PlaybackService : MediaSessionService() {
         retryJob?.cancel()
         retryJob = null
         retryCount = 0
+    }
+    // ---------------- 취침 타이머 ----------------
+
+    /** 설정된 시각이 되면 10초 동안 소리를 줄인 뒤 정지 */
+    private fun scheduleSleep() {
+        sleepJob?.cancel()
+        val at = SleepTimer.get(this) ?: return
+        // 서비스가 꺼져 있는 동안 지나가버린 타이머는 정리만 함
+        if (at < System.currentTimeMillis() - 60_000L) {
+            SleepTimer.set(this, null)
+            return
+        }
+        sleepJob = scope.launch {
+            val wait = at - SleepTimer.FADE_MS - System.currentTimeMillis()
+            if (wait > 0) delay(wait)
+            val exo = exoPlayer ?: return@launch
+            fadingOut = true
+            try {
+                val steps = 20
+                for (i in steps downTo 1) {
+                    if (!exo.playWhenReady) break
+                    exo.volume = i / steps.toFloat()
+                    delay(SleepTimer.FADE_MS / steps)
+                }
+                if (exo.playWhenReady) {
+                    exo.pause()
+                    exo.stop()
+                }
+                Log.i("KRadio", "취침 타이머: 재생 중지")
+                SleepTimer.set(this@PlaybackService, null)
+            } finally {
+                // 중간에 취소돼도 음량은 원래대로
+                exo.volume = 1f
+                fadingOut = false
+            }
+        }
     }
 
     // ---------------- 방송 정보 표시 ----------------

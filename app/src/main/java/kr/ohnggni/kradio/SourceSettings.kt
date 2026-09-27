@@ -84,3 +84,19 @@ object StartupSettings {
     fun resumeChannelId(c: Context, visible: List<Channel>): String? =
         (if (mode(c) == MODE_FIXED) fixedVisible(c, visible) else null) ?: lastVisible(c, visible)
 }
+
+/** 취침 타이머: 재생을 멈출 시각 (없으면 꺼짐) */
+object SleepTimer {
+    const val KEY = "sleep_at"
+    const val FADE_MS = 10_000L   // 멈추기 전 소리를 서서히 줄이는 시간
+
+    private fun sp(c: Context) = c.getSharedPreferences(ChannelPrefs.PREFS, Context.MODE_PRIVATE)
+
+    fun get(c: Context): Long? = sp(c).getLong(KEY, 0L).takeIf { it > 0 }
+
+    fun set(c: Context, at: Long?) {
+        sp(c).edit().apply {
+            if (at == null) remove(KEY) else putLong(KEY, at)
+        }.apply()
+    }
+}

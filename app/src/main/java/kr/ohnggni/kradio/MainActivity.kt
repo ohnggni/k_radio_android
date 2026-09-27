@@ -60,6 +60,8 @@ class MainActivity : ComponentActivity() {
     private var startupChannel by mutableStateOf<String?>(null)
     private var pendingAutoStart = false   // 앱이 앞으로 나올 때 true
     private var recreated = false          // 폴드·회전으로 화면만 다시 만들어진 경우
+    private var sleepAt by mutableStateOf<Long?>(null)
+    private var showSleep by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -94,6 +96,7 @@ class MainActivity : ComponentActivity() {
                 while (true) {
                     epg = EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity))
                     now = System.currentTimeMillis()
+                    sleepAt = SleepTimer.get(this@MainActivity)
                     updateWarning()
                     delay(60_000L - now % 60_000L)
                 }
@@ -107,24 +110,36 @@ class MainActivity : ComponentActivity() {
                 }
 
                 when (screen) {
-                    Screen.MAIN -> MainScreen(
-                        channels = channels,
-                        epg = epg,
-                        now = now,
-                        currentId = currentId,
-                        isOn = isOn,
-                        status = status,
-                        enabled = controller != null,
-                        onChannelClick = { playChannel(it) },
-                        onPlayStop = { playStop() },
-                        onPrev = { controller?.seekToPrevious() },
-                        onNext = { controller?.seekToNext() },
-                        warning = warning,
-                        updateNotice = updateNotice,
-                        onUpdate = { openUpdate() },
-                        onDismissUpdate = { dismissUpdate() },
-                        onOpenSettings = { screen = Screen.SETTINGS },
-                    )
+                    Screen.MAIN -> {
+                        MainScreen(
+                            channels = channels,
+                            epg = epg,
+                            now = now,
+                            currentId = currentId,
+                            isOn = isOn,
+                            status = status,
+                            enabled = controller != null,
+                            onChannelClick = { playChannel(it) },
+                            onPlayStop = { playStop() },
+                            onPrev = { controller?.seekToPrevious() },
+                            onNext = { controller?.seekToNext() },
+                            warning = warning,
+                            updateNotice = updateNotice,
+                            onUpdate = { openUpdate() },
+                            onDismissUpdate = { dismissUpdate() },
+                            onOpenSettings = { screen = Screen.SETTINGS },
+                            sleepAt = sleepAt,
+                            onOpenSleep = { showSleep = true },
+                        )
+                        if (showSleep) {
+                            SleepTimerDialog(
+                                sleepAt = sleepAt,
+                                onSetAt = { setSleep(it) },
+                                onCancelTimer = { setSleep(null) },
+                                onDismiss = { showSleep = false },
+                            )
+                        }
+                    }
 
                     Screen.SETTINGS -> SettingsScreen(
                         customConfig = customConfig,
@@ -188,6 +203,7 @@ class MainActivity : ComponentActivity() {
         // 폴드·회전으로 다시 만들어진 경우만 빼고, 앱이 앞으로 나올 때마다 자동 재생 여부 판단
         pendingAutoStart = !recreated
         recreated = false
+        sleepAt = SleepTimer.get(this)
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
         controllerFuture = future
@@ -199,6 +215,7 @@ class MainActivity : ComponentActivity() {
             c.addListener(object : Player.Listener {
                 override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                     isOn = playWhenReady
+                    sleepAt = SleepTimer.get(this@MainActivity)
                 }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     currentId = mediaItem?.mediaId
@@ -350,7 +367,12 @@ class MainActivity : ComponentActivity() {
     }
 
     // ---------------- 재생 ----------------
-    /** 앱을 새로 켰을 때 설정에 따라 자동 재생 (이미 재생 중이면 그대로 둠) */
+    /** 취침 타이머 설정/해제 (서비스가 설정 변경을 감지해서 동작) */
+    private fun setSleep(at: Long?) {
+        SleepTimer.set(this, at)
+        sleepAt = at
+        showSleep = false
+    }
     /** 앱이 앞으로 나왔을 때 설정에 따라 자동 재생 */
     private fun tryAutoStart() {
         if (!pendingAutoStart) return
