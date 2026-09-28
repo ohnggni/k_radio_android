@@ -2,14 +2,16 @@ package kr.ohnggni.kradio
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
+import android.util.Log
+import kotlinx.coroutines.delay
 
 data class Channel(
     val id: String,
@@ -22,19 +24,21 @@ data class Channel(
     val extractJson: String? = null,  // 예: channel_item[media_type=radio].service_url
     val extractRegex: String? = null,
     val epg: String? = null,          // 편성표(XMLTV) 채널 아이디
-    val logo: String? = null,         // 로고 이미지 전체 주소
+    val logo: String? = null,         // 로고 (asset:///logos/... 또는 인터넷 주소)
 )
 
 object ChannelRepository {
 
-    /** 설정 파일에 적힌 EPG 주소 (load 이후 사용 가능) */
-    @Volatile
-    var epgUrl: String? = null
+    /** 설정 파일에 적힌 EPG 주소 */
+    @Volatile var epgUrl: String? = null
         private set
 
     /** 설정 파일의 logoBase (내장 로고가 없을 때만 예비로 사용) */
-    @Volatile
-    var logoBase: String? = null
+    @Volatile var logoBase: String? = null
+        private set
+
+    /** 채널 설정에 있는 편성표 채널 ID들 (편성표에서 이 채널만 읽음) */
+    @Volatile var epgIds: Set<String> = emptySet()
         private set
 
     /** 설정 파일에 적힌 최신 앱 버전과 다운로드 주소 */
@@ -46,31 +50,38 @@ object ChannelRepository {
         private set
 
     /** 마지막 불러오기에서 원격 접속이 실패한 사유 (null = 성공) */
-    @Volatile
-    var lastError: String? = null
+    @Volatile var lastError: String? = null
         private set
+
+    // 화면과 재생 서비스가 동시에 불러올 때 한 번에 하나씩만
     private val loadLock = Mutex()
 
     /** 원격 설정을 받아오고, 실패하면 이 주소로 마지막에 저장해둔 설정을 사용 */
-    suspend fun load(context: Context): List<Channel> = withContext(Dispatchers.IO) {
+    /**
+     * 원격 설정을 받아오고, 실패하면 이 주소로 마지막에 저장해둔 설정을 사용.
+     * quiet = true(재생 서비스의 백그라운드 갱신)면 실패해도 화면 경고를 띄우지 않음.
+     */
+    suspend fun load(context: Context, quiet: Boolean = false): List<Channel> = withContext(Dispatchers.IO) {
         loadLock.withLock {
             val url = SourceSettings.configUrl(context)
             val cache = File(context.filesDir, "channels_cache_${url.hashCode()}.json")
 
-            val remote = runCatching { httpGet(url, emptyMap()) }
+            val remote = fetchWithRetry(url)
             val remoteText = remote.getOrNull()?.takeIf { t -> runCatching { parse(t) }.isSuccess }
-            lastError = when {
+            val err = when {
                 remoteText != null -> null
                 remote.isFailure -> remote.exceptionOrNull()?.message ?: "연결 실패"
                 else -> "설정 파일 형식이 올바르지 않음"
             }
+            if (err != null) Log.w("KRadio", "채널 설정 받기 실패${if (quiet) "(백그라운드)" else ""}: $err")
+            // 성공은 언제나 경고를 지우고, 실패는 화면에서 부른 경우만 경고로 남김
+            if (err == null || !quiet) lastError = err
 
             val text = when {
                 remoteText != null -> {
                     cache.writeText(remoteText)
                     remoteText
                 }
-
                 cache.exists() -> cache.readText()
                 else -> error("채널 설정을 불러올 수 없음")
             }
@@ -78,7 +89,16 @@ object ChannelRepository {
         }
     }
 
-    /** 채널 하나를 실제 재생 가능한 m3u8 주소로 변환 */
+    /** 일시적인 네트워크 실패 대비: 실패하면 2초 뒤 한 번 더 */
+    private suspend fun fetchWithRetry(url: String): Result<String> {
+        val first = runCatching { httpGet(url, emptyMap(), timeoutMs = 10_000) }
+        if (first.isSuccess) return first
+        Log.w("KRadio", "채널 설정 받기 재시도: ${first.exceptionOrNull()?.message}")
+        delay(2000)
+        return runCatching { httpGet(url, emptyMap(), timeoutMs = 10_000) }
+    }
+
+    /** 채널 하나를 실제 재생 가능한 스트림 주소로 변환 */
     suspend fun resolve(ch: Channel): String = withContext(Dispatchers.IO) {
         when (ch.type) {
             "direct" -> ch.url ?: error("[${ch.id}] url 없음")
@@ -104,9 +124,10 @@ object ChannelRepository {
         latestVersionCode = root.optLong("latestVersionCode", 0L).takeIf { it > 0 }
         latestVersionName = root.optString("latestVersionName").ifEmpty { null }
         updateUrl = root.optString("updateUrl").ifEmpty { null }
+
         val headerSets = root.optJSONObject("headerSets")
         val arr = root.getJSONArray("channels")
-        return (0 until arr.length()).map { i ->
+        val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             val setName = o.optString("headers")
             val h = if (setName.isNotEmpty()) headerSets?.optJSONObject(setName) else null
@@ -130,6 +151,8 @@ object ChannelRepository {
                 logo = logo,
             )
         }
+        epgIds = list.mapNotNull { it.epg }.toSet()
+        return list
     }
 
     /** "a[key=value].b" 형태의 간단한 JSON 경로 추출 */
@@ -150,10 +173,10 @@ object ChannelRepository {
         return (cur as? String)?.takeIf { it.isNotEmpty() }
     }
 
-    private fun httpGet(url: String, headers: Map<String, String>): String {
+    private fun httpGet(url: String, headers: Map<String, String>, timeoutMs: Int = 5000): String {
         val conn = URI(url).toURL().openConnection() as HttpURLConnection
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
+        conn.connectTimeout = timeoutMs
+        conn.readTimeout = timeoutMs
         headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
         try {
             if (conn.responseCode !in 200..299) error("HTTP ${conn.responseCode}: $url")

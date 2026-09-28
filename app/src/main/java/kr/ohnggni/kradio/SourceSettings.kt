@@ -100,3 +100,18 @@ object SleepTimer {
         }.apply()
     }
 }
+
+/** 케이라디오 전용 음량 (%). 100 초과는 증폭 */
+object AppVolume {
+    const val KEY = "app_volume"
+    const val MIN = 50
+    const val MAX = 200
+
+    private fun sp(c: Context) = c.getSharedPreferences(ChannelPrefs.PREFS, Context.MODE_PRIVATE)
+
+    fun get(c: Context): Int = sp(c).getInt(KEY, 100).coerceIn(MIN, MAX)
+
+    fun set(c: Context, pct: Int) {
+        sp(c).edit().putInt(KEY, pct.coerceIn(MIN, MAX)).apply()
+    }
+}

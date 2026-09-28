@@ -37,6 +37,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import android.media.audiofx.LoudnessEnhancer
+import kotlin.math.log2
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 private const val SCHEME = "kradio"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
@@ -67,6 +71,7 @@ class PlaybackService : MediaSessionService() {
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ChannelPrefs.KEY || key == SourceSettings.KEY_CONFIG) scope.launch { refreshPlaylist() }
         if (key == SleepTimer.KEY) scheduleSleep()
+        if (key == AppVolume.KEY) applyVolume()
     }
 
     // 스트림 서버(호스트)별로 붙일 헤더 (Referer 등)
@@ -88,6 +93,10 @@ class PlaybackService : MediaSessionService() {
     // 취침 타이머
     private var sleepJob: Job? = null
     private var fadingOut = false
+
+    // 앱 음량 (100% 이하는 플레이어 음량, 초과는 증폭 효과)
+    private var loudness: LoudnessEnhancer? = null
+    private var baseVolume = 1f
 
     // 내장 로고 이미지 데이터 (워치 등 외부 기기는 앱 내부 파일을 못 읽어서 데이터로 전달)
     private val logoBytesCache = ConcurrentHashMap<String, ByteArray>()
@@ -175,6 +184,12 @@ class PlaybackService : MediaSessionService() {
                     }
                 }
             }
+            // 오디오 세션이 바뀌면 증폭 효과를 새 세션에 다시 연결
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                loudness?.release()
+                loudness = null
+                applyVolume()
+            }
         })
 
         val player = object : ForwardingPlayer(exo) {
@@ -228,6 +243,7 @@ class PlaybackService : MediaSessionService() {
             }
         }
         scheduleSleep()
+        applyVolume()
     }
 
     // ---------------- 자동 재연결 ----------------
@@ -282,7 +298,7 @@ class PlaybackService : MediaSessionService() {
                 val steps = 20
                 for (i in steps downTo 1) {
                     if (!exo.playWhenReady) break
-                    exo.volume = i / steps.toFloat()
+                    exo.volume = baseVolume * i / steps.toFloat()
                     delay(SleepTimer.FADE_MS / steps)
                 }
                 if (exo.playWhenReady) {
@@ -293,10 +309,35 @@ class PlaybackService : MediaSessionService() {
                 SleepTimer.set(this@PlaybackService, null)
             } finally {
                 // 중간에 취소돼도 음량은 원래대로
-                exo.volume = 1f
+                exo.volume = baseVolume
                 fadingOut = false
             }
         }
+    }
+    // ---------------- 앱 음량 ----------------
+
+    /** 100% 이하는 플레이어 음량으로, 초과분은 증폭 효과로 (케이라디오 소리에만 적용) */
+    /** 귀에 느껴지는 크기 기준: 200% = +10dB(두 배), 50% = -10dB(절반). 케이라디오 소리에만 적용 */
+    private fun applyVolume() {
+        val exo = exoPlayer ?: return
+        val pct = AppVolume.get(this)
+        val db = 10 * log2(pct / 100.0)
+
+        // 줄일 때는 플레이어 음량으로, 키울 때는 증폭 효과로
+        baseVolume = if (db < 0) 10.0.pow(db / 20).toFloat() else 1f
+        if (!fadingOut) exo.volume = baseVolume
+
+        val gainMb = if (db > 0) (db * 100).roundToInt() else 0   // dB → 밀리벨
+        runCatching {
+            if (gainMb > 0) {
+                val le = loudness ?: LoudnessEnhancer(exo.audioSessionId).also { loudness = it }
+                le.setTargetGain(gainMb)
+                le.enabled = true
+            } else {
+                loudness?.enabled = false
+            }
+        }.onFailure { Log.w("KRadio", "음량 증폭 실패: ${it.message}") }
+        Log.i("KRadio", "앱 음량 ${pct}% (${"%.1f".format(db)}dB)")
     }
 
     // ---------------- 방송 정보 표시 ----------------
@@ -311,7 +352,7 @@ class PlaybackService : MediaSessionService() {
             if (count == 0) return
             val currentIdx = exo.currentMediaItemIndex
 
-            val epg = EpgRepository.load(this, SourceSettings.epgUrl(this))
+            val epg = EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true)
             val byId = allChannels.associateBy { it.id }
             var changed = false
 
@@ -358,7 +399,7 @@ class PlaybackService : MediaSessionService() {
     private suspend fun refreshBase(force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (!force && baseChannels != null && now - baseLoadedAt < BASE_REFRESH_MS) return
-        runCatching { ChannelRepository.load(this) }.onSuccess {
+        runCatching { ChannelRepository.load(this, quiet = true) }.onSuccess {
             baseChannels = it
             baseLoadedAt = now
         }
@@ -445,7 +486,7 @@ class PlaybackService : MediaSessionService() {
 
     /** 재생 목록 전체를 방송 정보까지 채워서 생성 */
     private suspend fun playlistItems(list: List<Channel>, startIdx: Int): List<MediaItem> {
-        val epg = runCatching { EpgRepository.load(this, SourceSettings.epgUrl(this)) }.getOrNull()
+        val epg = runCatching { EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true) }.getOrNull()
         return list.mapIndexed { i, ch -> decoratedItem(ch, epg, i == startIdx) }
     }
 
@@ -593,6 +634,8 @@ class PlaybackService : MediaSessionService() {
         runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(prefsListener)
+        loudness?.release()
+        loudness = null
         scope.cancel()
         mediaSession?.run {
             player.release()
