@@ -4,6 +4,27 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.2.0 (Unreleased)
+
+### New
+- **App volume** (Settings → App volume): 50–200%, applied to this app only.
+  - Uses a perceptual scale (200% ≈ +10 dB, 50% ≈ −10 dB). Above 100% uses loudness enhancement.
+  - Most effective on channels with quieter source audio; channels already mastered loud get only slightly louder.
+  - The auto-off fade-out follows the app volume.
+
+### Improved
+- Loading the channel config and program guide retries once after a transient failure, with a longer timeout.
+- Background refreshes by the playback service no longer raise connection warnings on screen (a successful refresh still clears them).
+- Failure reasons are logged for troubleshooting.
+- Only programs for configured channels within a yesterday–day-after-tomorrow window are kept in memory, so large custom program guides stay lightweight.
+- Program guide loading errors can no longer terminate the app.
+- Auto-off: times that have already passed or are less than a minute away are rejected, and programs ending within a minute are not listed.
+
+### Fixed
+- A channel config connection warning could appear right after installing or updating the app.
+
+---
+
 ## 1.1.1 (2026-09-27)
 
 ### Fixed
