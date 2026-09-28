@@ -27,6 +27,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kr.ohnggni.kradio.ui.theme.KRadioTheme
 import android.content.SharedPreferences
+import android.widget.Toast
 
 private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE }
 
@@ -63,6 +64,8 @@ class MainActivity : ComponentActivity() {
     private var recreated = false          // 폴드·회전으로 화면만 다시 만들어진 경우
     private var sleepAt by mutableStateOf<Long?>(null)
     private var showSleep by mutableStateOf(false)
+
+    private var appVolume by mutableStateOf(100)
     // 꺼짐 예약 값이 바뀌면(설정·취소·종료) 즉시 재생기 표시에 반영
     private val sleepPrefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == SleepTimer.KEY) sleepAt = SleepTimer.get(this)
@@ -80,6 +83,7 @@ class MainActivity : ComponentActivity() {
         recreated = savedInstanceState != null
         startupMode = StartupSettings.mode(this)
         startupChannel = StartupSettings.fixedChannel(this)
+        appVolume = AppVolume.get(this)
 
         customConfig = SourceSettings.customConfigUrl(this)
         customEpg = SourceSettings.customEpgUrl(this)
@@ -99,7 +103,9 @@ class MainActivity : ComponentActivity() {
             // 화면이 보이는 동안 매 분 정각마다 편성 정보 갱신
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
-                    epg = EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity))
+                    runCatching {
+                        EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity), force = true)
+                    }.getOrNull()?.let { epg = it }
                     now = System.currentTimeMillis()
                     sleepAt = SleepTimer.get(this@MainActivity)
                     updateWarning()
@@ -140,7 +146,7 @@ class MainActivity : ComponentActivity() {
                             SleepTimerDialog(
                                 sleepAt = sleepAt,
                                 programs = channels.firstOrNull { it.id == currentId }
-                                    ?.let { ch -> epg?.upcoming(ch.epg, System.currentTimeMillis()) }
+                                    ?.let { ch -> epg?.upcoming(ch.epg, System.currentTimeMillis() + 60_000L) }
                                     ?: emptyList(),
                                 onSetAt = { setSleep(it) },
                                 onCancelTimer = { setSleep(null) },
@@ -179,6 +185,11 @@ class MainActivity : ComponentActivity() {
                             StartupSettings.save(this, mode, id)
                             startupMode = mode
                             startupChannel = id
+                        },
+                        appVolume = appVolume,
+                        onSetAppVolume = {
+                            AppVolume.set(this, it)
+                            appVolume = it
                         },
                     )
 
@@ -259,7 +270,9 @@ class MainActivity : ComponentActivity() {
                     base = it
                     if (status.startsWith("채널 정보")) status = ""
                 }
-            epg = EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity), force = true)
+            // 예상 못 한 오류가 나도 앱이 종료되지 않고 기존 편성표 유지
+            runCatching { EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity)) }
+                .getOrNull()?.let { epg = it }
             now = System.currentTimeMillis()
             updateWarning()
             updateUpdateInfo()
@@ -379,8 +392,12 @@ class MainActivity : ComponentActivity() {
     }
 
     // ---------------- 재생 ----------------
-    /** 취침 타이머 설정/해제 (서비스가 설정 변경을 감지해서 동작) */
+    /** 꺼짐 예약 설정/해제. 이미 지났거나 1분 안에 오는 시각은 받지 않음 */
     private fun setSleep(at: Long?) {
+        if (at != null && at < System.currentTimeMillis() + 60_000L) {
+            Toast.makeText(this, "이미 지났거나 곧 끝나는 시각이에요", Toast.LENGTH_SHORT).show()
+            return   // 예약 창은 열어둔 채로 다시 고를 수 있게
+        }
         SleepTimer.set(this, at)
         sleepAt = at
         showSleep = false
