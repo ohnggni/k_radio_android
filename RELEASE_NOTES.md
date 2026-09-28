@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.2.0 (Unreleased)
+## 1.2.0 (2026-09-28)
 
 ### New
 - **App volume** (Settings → App volume): 50–200%, applied to this app only.
