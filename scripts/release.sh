@@ -14,7 +14,6 @@ GRADLE_FILE="app/build.gradle.kts"
 OUT_DIR="$HOME/KRadio-release"
 APK="$OUT_DIR/KRadio-$VER.apk"
 DRIVE="mygd:/MyGD/KRadio_releases/"
-DEVICE="R5KL700JYQN"
 
 echo "▶ 0. 사전 확인"
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -44,7 +43,11 @@ echo "$BADGE" | grep -q "versionCode='$NEW_CODE' versionName='$VER'" || {
 echo "   $APK ($(du -h "$APK" | cut -f1)) 버전·서명 확인"
 
 echo "▶ 3. 내 폰에 설치"
-if adb -s "$DEVICE" get-state >/dev/null 2>&1; then
+# USB·무선 상관없이 연결된 기기 찾기 (여러 대면 내 폰 우선)
+DEVICES=$(adb devices | awk 'NR>1 && $2=="device" {print $1}')
+DEVICE=$(echo "$DEVICES" | grep -m1 "R5KL700JYQN" || echo "$DEVICES" | head -1)
+if [ -n "$DEVICE" ]; then
+  echo "   기기: $DEVICE"
   adb -s "$DEVICE" install -r "$APK"
   read -r -p "   폰에서 동작 확인 후 Enter (중단하려면 Ctrl+C) " _
 else
