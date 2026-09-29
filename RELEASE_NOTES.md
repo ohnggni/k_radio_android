@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.3.0 (Unreleased)
+## 1.3.0 (2026-09-29)
 
 ### New
 - **Volume slider in the player bar** (always visible), replacing the App volume setting.
