@@ -28,6 +28,12 @@ import kotlinx.coroutines.launch
 import kr.ohnggni.kradio.ui.theme.KRadioTheme
 import android.content.SharedPreferences
 import android.widget.Toast
+import android.database.ContentObserver
+import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import androidx.compose.runtime.mutableIntStateOf
 
 private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE }
 
@@ -65,8 +71,17 @@ class MainActivity : ComponentActivity() {
     private var sleepAt by mutableStateOf<Long?>(null)
     private var showSleep by mutableStateOf(false)
 
-    private var appVolume by mutableStateOf(100)
+    private var appVolume by mutableIntStateOf(100)
     // 꺼짐 예약 값이 바뀌면(설정·취소·종료) 즉시 재생기 표시에 반영
+    private var volumeSync by mutableStateOf(false)
+    private var sysVol by mutableIntStateOf(0)
+    private var sysMax by mutableIntStateOf(15)
+    private val audioManager by lazy { getSystemService(AudioManager::class.java) }
+
+    // 폰 볼륨 버튼 등으로 시스템 음량이 바뀌면 슬라이더도 따라 움직이게
+    private val volumeObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) = readSystemVolume()
+    }
     private val sleepPrefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == SleepTimer.KEY) sleepAt = SleepTimer.get(this)
     }
@@ -84,6 +99,7 @@ class MainActivity : ComponentActivity() {
         startupMode = StartupSettings.mode(this)
         startupChannel = StartupSettings.fixedChannel(this)
         appVolume = AppVolume.get(this)
+        volumeSync = AppVolume.isSync(this)
 
         customConfig = SourceSettings.customConfigUrl(this)
         customEpg = SourceSettings.customEpgUrl(this)
@@ -141,6 +157,23 @@ class MainActivity : ComponentActivity() {
                             onOpenSettings = { screen = Screen.SETTINGS },
                             sleepAt = sleepAt,
                             onOpenSleep = { showSleep = true },
+                            appVolume = appVolume,
+                            volumeSync = volumeSync,
+                            sysVol = sysVol,
+                            sysMax = sysMax,
+                            onAppVolume = { changeAppVolume(it) },
+                            onSysVolume = { setSysVolume(it) },
+                            onToggleSync = { on ->
+                                AppVolume.setSync(this, on)
+                                volumeSync = on
+                                // 시스템 모드로 바꾸면 안 보이는 앱 증폭이 남지 않게 100%로
+                                if (on) {
+                                    AppVolume.set(this, 100)
+                                    appVolume = 100
+                                }
+                                readSystemVolume()
+                            },
+                            onToggleMute = { toggleMute() },
                         )
                         if (showSleep) {
                             SleepTimerDialog(
@@ -186,11 +219,6 @@ class MainActivity : ComponentActivity() {
                             startupMode = mode
                             startupChannel = id
                         },
-                        appVolume = appVolume,
-                        onSetAppVolume = {
-                            AppVolume.set(this, it)
-                            appVolume = it
-                        },
                     )
 
                     Screen.MANAGE -> ChannelManageScreen(
@@ -225,6 +253,8 @@ class MainActivity : ComponentActivity() {
         sleepAt = SleepTimer.get(this)
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
             .registerOnSharedPreferenceChangeListener(sleepPrefListener)
+        readSystemVolume()
+        contentResolver.registerContentObserver(Settings.System.CONTENT_URI, true, volumeObserver)
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
         controllerFuture = future
@@ -257,6 +287,7 @@ class MainActivity : ComponentActivity() {
         controller = null
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(sleepPrefListener)
+        contentResolver.unregisterContentObserver(volumeObserver)
         super.onStop()
     }
 
@@ -392,6 +423,51 @@ class MainActivity : ComponentActivity() {
     }
 
     // ---------------- 재생 ----------------
+    private fun readSystemVolume() {
+        sysMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        sysVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+    }
+    private fun changeAppVolume(v: Int) {
+        AppVolume.set(this, v)
+        appVolume = v
+        // 처음으로 100%를 넘기면 증폭 한계를 한 번만 안내
+        val sp = getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
+        if (v > 100 && !sp.getBoolean("boost_tip_shown", false)) {
+            sp.edit().putBoolean("boost_tip_shown", true).apply()
+            Toast.makeText(
+                this,
+                "100%를 넘으면 증폭돼요. 원래 소리가 큰 방송은 조금만 커져요.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun setSysVolume(v: Int) {
+        runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0) }
+        sysVol = v
+    }
+
+    /** 스피커 아이콘: 음소거 ↔ 직전 음량으로 복원 */
+    private fun toggleMute() {
+        val sp = getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
+        if (volumeSync) {
+            if (sysVol > 0) {
+                sp.edit().putInt("sys_before_mute", sysVol).apply()
+                setSysVolume(0)
+            } else {
+                val restore = sp.getInt("sys_before_mute", 0).takeIf { it > 0 }
+                    ?: (sysMax / 2).coerceAtLeast(1)
+                setSysVolume(restore)
+            }
+        } else {
+            if (appVolume > 0) {
+                sp.edit().putInt("app_before_mute", appVolume).apply()
+                changeAppVolume(0)
+            } else {
+                changeAppVolume(sp.getInt("app_before_mute", 100).takeIf { it > 0 } ?: 100)
+            }
+        }
+    }
     /** 꺼짐 예약 설정/해제. 이미 지났거나 1분 안에 오는 시각은 받지 않음 */
     private fun setSleep(at: Long?) {
         if (at != null && at < System.currentTimeMillis() + 60_000L) {
