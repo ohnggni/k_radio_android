@@ -4,6 +4,21 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.3.0 (Unreleased)
+
+### New
+- **Volume slider in the player bar** (always visible), replacing the App volume setting.
+  - App mode: controls this app only, 0–300% (0% mutes; above 100% uses loudness enhancement, 5% steps).
+  - System mode (checkbox): controls the device media volume directly and follows the hardware volume buttons. Switching to system mode resets the app volume to 100%.
+  - Speaker icon toggles mute and restores the previous level.
+  - A one-time tip explains the limits of amplification the first time the volume goes above 100%.
+
+### Improved
+- Larger round slider thumb and taller touch area for easier dragging.
+- The volume row sits above the playback controls to stay clear of the bottom system gesture area, and side back gestures are excluded on that row.
+
+---
+
 ## 1.2.0 (2026-09-28)
 
 ### New
