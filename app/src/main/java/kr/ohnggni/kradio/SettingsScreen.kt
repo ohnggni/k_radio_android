@@ -13,7 +13,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
-import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
@@ -35,13 +34,10 @@ fun SettingsScreen(
     startupMode: String,
     startupChannel: String?,
     onSaveStartup: (String, String?) -> Unit,
-    appVolume: Int,
-    onSetAppVolume: (Int) -> Unit,
 ) {
     var editConfig by remember { mutableStateOf(false) }
     var editEpg by remember { mutableStateOf(false) }
     var editStartup by remember { mutableStateOf(false) }
-    var editVolume by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -81,11 +77,6 @@ fun SettingsScreen(
                     else -> "재생 안 함"
                 },
                 onClick = { editStartup = true }
-            )
-            SettingRow(
-                title = "앱 음량",
-                value = if (appVolume > 100) "${appVolume}% (증폭)" else "${appVolume}%",
-                onClick = { editVolume = true }
             )
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -161,13 +152,6 @@ fun SettingsScreen(
             currentChannel = startupChannel,
             onDismiss = { editStartup = false },
             onSave = { mode, id -> onSaveStartup(mode, id); editStartup = false }
-        )
-    }
-    if (editVolume) {
-        VolumeDialog(
-            current = appVolume,
-            onChange = onSetAppVolume,
-            onDismiss = { editVolume = false }
         )
     }
 }
@@ -339,45 +323,6 @@ private fun ModeOption(label: String, selected: Boolean, onClick: () -> Unit) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }
-@Composable
-private fun VolumeDialog(current: Int, onChange: (Int) -> Unit, onDismiss: () -> Unit) {
-    var v by remember { mutableFloatStateOf(current.toFloat()) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("앱 음량") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "${v.roundToInt()}%",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Slider(
-                    value = v,
-                    onValueChange = {
-                        v = it
-                        onChange(it.roundToInt())   // 움직이는 즉시 재생 중인 소리에 반영
-                    },
-                    valueRange = AppVolume.MIN.toFloat()..AppVolume.MAX.toFloat(),
-                    steps = (AppVolume.MAX - AppVolume.MIN) / 10 - 1   // 10% 단위
-                )
-                Text(
-                    "휴대폰 음량은 그대로 두고 케이라디오 소리만 줄이거나 키워요.\n" +
-                            "키우는 쪽은 원래 소리가 작은 채널에서 효과가 크고, 이미 소리가 큰 채널은 조금만 커져요.\n" +
-                            "내비 안내보다 라디오를 크게 듣고 싶다면 내비 앱의 안내 음성 크기를 줄이는 게 가장 확실해요.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("확인") } },
-        dismissButton = {
-            TextButton(onClick = {
-                v = 100f
-                onChange(100)
-            }) { Text("100%로") }
-        }
-    )
-}
+
 private val IconBackSettings =
     svgIcon("back", "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z")

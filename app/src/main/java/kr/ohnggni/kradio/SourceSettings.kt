@@ -101,11 +101,12 @@ object SleepTimer {
     }
 }
 
-/** 케이라디오 전용 음량 (%). 100 초과는 증폭 */
+/** 케이라디오 전용 음량 (%). 0 = 무음, 100 초과는 증폭 */
 object AppVolume {
     const val KEY = "app_volume"
-    const val MIN = 50
-    const val MAX = 200
+    const val KEY_SYNC = "volume_sync"
+    const val MIN = 0
+    const val MAX = 300
 
     private fun sp(c: Context) = c.getSharedPreferences(ChannelPrefs.PREFS, Context.MODE_PRIVATE)
 
@@ -113,5 +114,12 @@ object AppVolume {
 
     fun set(c: Context, pct: Int) {
         sp(c).edit().putInt(KEY, pct.coerceIn(MIN, MAX)).apply()
+    }
+
+    /** true = 재생기 슬라이더가 시스템 미디어 음량을 조절 */
+    fun isSync(c: Context): Boolean = sp(c).getBoolean(KEY_SYNC, false)
+
+    fun setSync(c: Context, on: Boolean) {
+        sp(c).edit().putBoolean(KEY_SYNC, on).apply()
     }
 }

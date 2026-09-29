@@ -316,18 +316,21 @@ class PlaybackService : MediaSessionService() {
     }
     // ---------------- 앱 음량 ----------------
 
-    /** 100% 이하는 플레이어 음량으로, 초과분은 증폭 효과로 (케이라디오 소리에만 적용) */
-    /** 귀에 느껴지는 크기 기준: 200% = +10dB(두 배), 50% = -10dB(절반). 케이라디오 소리에만 적용 */
+    /** 귀에 느껴지는 크기 기준: 200% = +10dB, 50% = -10dB, 0% = 무음. 케이라디오 소리에만 적용 */
     private fun applyVolume() {
         val exo = exoPlayer ?: return
         val pct = AppVolume.get(this)
-        val db = 10 * log2(pct / 100.0)
+        val db = if (pct > 0) 10 * log2(pct / 100.0) else 0.0
 
         // 줄일 때는 플레이어 음량으로, 키울 때는 증폭 효과로
-        baseVolume = if (db < 0) 10.0.pow(db / 20).toFloat() else 1f
+        baseVolume = when {
+            pct == 0 -> 0f
+            db < 0 -> 10.0.pow(db / 20).toFloat()
+            else -> 1f
+        }
         if (!fadingOut) exo.volume = baseVolume
 
-        val gainMb = if (db > 0) (db * 100).roundToInt() else 0   // dB → 밀리벨
+        val gainMb = if (pct > 100) (db * 100).roundToInt() else 0   // dB → 밀리벨
         runCatching {
             if (gainMb > 0) {
                 val le = loudness ?: LoudnessEnhancer(exo.audioSessionId).also { loudness = it }
@@ -337,7 +340,7 @@ class PlaybackService : MediaSessionService() {
                 loudness?.enabled = false
             }
         }.onFailure { Log.w("KRadio", "음량 증폭 실패: ${it.message}") }
-        Log.i("KRadio", "앱 음량 ${pct}% (${"%.1f".format(db)}dB)")
+        Log.i("KRadio", "앱 음량 ${pct}%${if (pct > 0) " (${"%.1f".format(db)}dB)" else " (무음)"}")
     }
 
     // ---------------- 방송 정보 표시 ----------------
