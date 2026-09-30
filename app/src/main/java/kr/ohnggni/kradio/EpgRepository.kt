@@ -52,6 +52,12 @@ class EpgData(private val byChannel: Map<String, List<Program>>) {
         val list = epgId?.let { byChannel[it] } ?: return emptyList()
         return list.filter { it.stop > now && it.stop - it.start >= SHORT_MS }.take(count)
     }
+    /** 켜짐 예약용: 지금부터 hours시간 안에 시작하는 본 프로그램 목록 */
+    fun schedule(epgId: String?, now: Long = System.currentTimeMillis(), hours: Int = 36): List<Program> {
+        val list = epgId?.let { byChannel[it] } ?: return emptyList()
+        val end = now + hours * 3600_000L
+        return list.filter { it.start > now && it.start < end && it.stop - it.start >= SHORT_MS }
+    }
 
     val isEmpty: Boolean get() = byChannel.isEmpty()
 }
@@ -81,6 +87,7 @@ object EpgRepository {
         url: String?,
         force: Boolean = false,
         quiet: Boolean = false,
+        offline: Boolean = false,   // true면 인터넷에서 받지 않고 저장본만 사용
     ): EpgData = withContext(Dispatchers.IO) {
         loadLock.withLock {
             val now = System.currentTimeMillis()
@@ -96,7 +103,7 @@ object EpgRepository {
             val cache = File(context.filesDir, "epg_cache_${url.hashCode()}.xml")
             val cacheFresh = cache.exists() && now - cache.lastModified() < REFRESH_MS
 
-            if ((force || !cacheFresh) && url != null) {
+            if ((force || !cacheFresh) && url != null && !offline) {
                 val result = downloadWithRetry(url, cache)
                 if (result.isSuccess) {
                     lastError = null

@@ -41,6 +41,10 @@ import android.media.audiofx.LoudnessEnhancer
 import kotlin.math.log2
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.media.AudioManager
 
 private const val SCHEME = "kradio"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
@@ -72,6 +76,7 @@ class PlaybackService : MediaSessionService() {
         if (key == ChannelPrefs.KEY || key == SourceSettings.KEY_CONFIG) scope.launch { refreshPlaylist() }
         if (key == SleepTimer.KEY) scheduleSleep()
         if (key == AppVolume.KEY) applyVolume()
+        if (key == ScheduledStart.KEY) onScheduledStartRequested()
     }
 
     // 스트림 서버(호스트)별로 붙일 헤더 (Referer 등)
@@ -97,6 +102,21 @@ class PlaybackService : MediaSessionService() {
     // 앱 음량 (100% 이하는 플레이어 음량, 초과는 증폭 효과)
     private var loudness: LoudnessEnhancer? = null
     private var baseVolume = 1f
+
+    // 켜짐 예약: 서서히 커지기, 실패 감시
+    private var fadingIn = false
+    private var fadeJob: Job? = null
+    private var scheduleWatchJob: Job? = null
+
+    private var focusDeferred = false   // 예약 재생 중: 앱을 열 때까지 오디오 포커스 요청 보류
+
+    private var pausedAt = 0L   // 멈춘 시각 (재개할 때 라이브 지점으로 갈지 판단)
+
+    // 오디오 속성 (예약 재생 때 포커스 처리를 잠시 껐다 켜기 위해 보관)
+    private val audioAttrs = AudioAttributes.Builder()
+        .setUsage(C.USAGE_MEDIA)
+        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        .build()
 
     // 내장 로고 이미지 데이터 (워치 등 외부 기기는 앱 내부 파일을 못 읽어서 데이터로 전달)
     private val logoBytesCache = ConcurrentHashMap<String, ByteArray>()
@@ -139,13 +159,7 @@ class PlaybackService : MediaSessionService() {
 
         val exo = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .build(),
-                true
-            )
+            .setAudioAttributes(audioAttrs, true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
@@ -171,17 +185,53 @@ class PlaybackService : MediaSessionService() {
                     Log.i("KRadio", "재연결 성공")
                     cancelRetry()
                 }
+                // 켜짐 예약으로 켠 재생이 실제로 시작됨
+                if (isPlaying) {
+                    ScheduledStart.get(this@PlaybackService)?.let { p ->
+                        ScheduledStart.clear(this@PlaybackService)
+                        scheduleWatchJob?.cancel()
+                        applyScheduledVolume(p.channelName, p.volume)
+                        fadeIn()
+                        scope.launch {
+                            applyAutoOff(p.autoOff)
+                            // 포그라운드 서비스가 된 뒤 포커스 처리 재개 (targetSdk 36 기준 허용)
+                            delay(1_500)
+                            exoPlayer?.setAudioAttributes(audioAttrs, true)
+                            focusDeferred = false
+                            Log.i("KRadio", "켜짐 예약: 오디오 포커스 처리 재개")
+                        }
+                        Log.i("KRadio", "켜짐 예약 재생 시작: ${p.channelName}")
+                    }
+                }
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (!playWhenReady) {
                     // 사용자가 정지하면 재연결 중단 + 정지 시각 기록 (다음 실행 시 자동 재생 판단용)
                     cancelRetry()
+                    fadeJob?.cancel()
+                    pausedAt = System.currentTimeMillis()
                     prefs.edit().putLong("stopped_at", System.currentTimeMillis()).apply()
-                    // 직접 정지하면 취침 타이머도 취소 (전화 수신 등 자동 일시정지는 유지)
+                    // 직접 정지하면 꺼짐 예약도 취소 (전화 수신 등 자동 일시정지는 유지)
                     if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST && !fadingOut) {
                         SleepTimer.set(this@PlaybackService, null)
+                        // 켜짐 예약 연결 중에 직접 끈 거면 실패 알림 안 띄움
+                        scheduleWatchJob?.cancel()
+                        ScheduledStart.clear(this@PlaybackService)
+                        exoPlayer?.setAudioAttributes(audioAttrs, true)
+                        focusDeferred = false
                     }
+                } else {
+                    resumeAtLiveEdgeIfStale()
+                }
+            }
+
+            // 통화·내비 음성 등으로 잠시 소리를 양보했다가 돌아올 때
+            override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+                if (playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE) {
+                    pausedAt = System.currentTimeMillis()
+                } else {
+                    resumeAtLiveEdgeIfStale()
                 }
             }
             // 오디오 세션이 바뀌면 증폭 효과를 새 세션에 다시 연결
@@ -189,6 +239,9 @@ class PlaybackService : MediaSessionService() {
                 loudness?.release()
                 loudness = null
                 applyVolume()
+                scheduleSleep()
+                applyVolume()
+                onScheduledStartRequested()   // 예약이 서비스를 새로 띄운 경우
             }
         })
 
@@ -272,11 +325,20 @@ class PlaybackService : MediaSessionService() {
         exo.seekToDefaultPosition() // 라이브 최신 지점으로
         exo.prepare()
     }
-
     private fun cancelRetry() {
         retryJob?.cancel()
         retryJob = null
         retryCount = 0
+    }
+    /** 3초 넘게 멈췄다 재개하면, 쌓여 있던 지난 방송 대신 지금 방송(라이브 지점)부터 */
+    private fun resumeAtLiveEdgeIfStale() {
+        val exo = exoPlayer ?: return
+        val paused = pausedAt
+        pausedAt = 0L
+        if (paused == 0L || System.currentTimeMillis() - paused < 3_000L) return
+        if (exo.playbackState == Player.STATE_IDLE) return   // 정지 후 재생은 어차피 새로 받음
+        exo.seekToDefaultPosition()
+        Log.i("KRadio", "재개: 라이브 지점으로 이동 (${(System.currentTimeMillis() - paused) / 1000}초 멈춤)")
     }
     // ---------------- 취침 타이머 ----------------
 
@@ -328,7 +390,7 @@ class PlaybackService : MediaSessionService() {
             db < 0 -> 10.0.pow(db / 20).toFloat()
             else -> 1f
         }
-        if (!fadingOut) exo.volume = baseVolume
+        if (!fadingOut && !fadingIn) exo.volume = baseVolume
 
         val gainMb = if (pct > 100) (db * 100).roundToInt() else 0   // dB → 밀리벨
         runCatching {
@@ -342,11 +404,116 @@ class PlaybackService : MediaSessionService() {
         }.onFailure { Log.w("KRadio", "음량 증폭 실패: ${it.message}") }
         Log.i("KRadio", "앱 음량 ${pct}%${if (pct > 0) " (${"%.1f".format(db)}dB)" else " (무음)"}")
     }
+    // ---------------- 켜짐 예약 ----------------
+
+    /** 예약으로 켜는 중: 소리를 0에서 시작하고, 60초 안에 재생이 안 되면 실패 알림 */
+    private fun onScheduledStartRequested() {
+        val p = ScheduledStart.get(this) ?: return
+        val exo = exoPlayer ?: return
+        fadingIn = true
+        exo.volume = 0f
+        // 백그라운드에서는 오디오 포커스가 거부되므로, 재생이 시작될 때까지 포커스 요청 없이 진행
+        exo.setAudioAttributes(audioAttrs, false)
+        scheduleWatchJob?.cancel()
+        scheduleWatchJob = scope.launch {
+            delay(60_000)
+            if (ScheduledStart.get(this@PlaybackService) != null) {
+                ScheduledStart.clear(this@PlaybackService)
+                fadingIn = false
+                exo.setAudioAttributes(audioAttrs, true)
+                applyVolume()
+                notifyScheduleFailed(p.channelName)
+                Log.w("KRadio", "켜짐 예약 실패: ${p.channelName}")
+            }
+        }
+    }
+
+    /** 재생이 시작된 뒤(포그라운드 서비스 상태) 폰 미디어 음량을 예약 값으로. 막히면 알림 */
+    private fun applyScheduledVolume(name: String, pct: Int) {
+        val am = getSystemService(AudioManager::class.java)
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val level = (max * pct / 100.0).roundToInt().coerceIn(1, max)
+        runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0) }
+            .onFailure { Log.w("KRadio", "켜짐 예약 음량 설정 실패: ${it.message}") }
+        val actual = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        Log.i("KRadio", "켜짐 예약 음량(재생 중): 요청 $level/$max → 실제 $actual/$max")
+        if (actual == 0) notifyScheduleMuted(name)
+    }
+
+    private fun notifyScheduleMuted(name: String) {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel("schedule", "켜짐 예약", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        val open = PendingIntent.getActivity(
+            this, 2, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        val n = Notification.Builder(this, "schedule")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("켜짐 예약: $name 재생 중")
+            .setContentText("휴대폰 미디어 음량이 0이라 소리가 나지 않아요. 눌러서 음량을 올려주세요.")
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        runCatching { nm.notify(2002, n) }
+    }
+    /** 10초 동안 서서히 커지기 */
+    private fun fadeIn() {
+        fadeJob?.cancel()
+        fadeJob = scope.launch {
+            val exo = exoPlayer ?: return@launch
+            fadingIn = true
+            try {
+                for (i in 1..20) {
+                    exo.volume = baseVolume * i / 20f
+                    delay(500)
+                }
+            } finally {
+                exo.volume = baseVolume
+                fadingIn = false
+            }
+        }
+    }
+
+    /** 예약의 자동 꺼짐을 꺼짐 예약으로 연결 */
+    private suspend fun applyAutoOff(autoOff: Int) {
+        val at = when {
+            autoOff > 0 -> System.currentTimeMillis() + autoOff * 60_000L
+            autoOff == AUTO_OFF_PROGRAM_END -> {
+                val ch = allChannels.firstOrNull { it.id == exoPlayer?.currentMediaItem?.mediaId }
+                val epg = runCatching {
+                    EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true)
+                }.getOrNull()
+                epg?.upcoming(ch?.epg, System.currentTimeMillis() + 60_000L)?.firstOrNull()?.stop
+            }
+            else -> null
+        }
+        if (at != null) {
+            SleepTimer.set(this, at)
+            Log.i("KRadio", "켜짐 예약 자동 꺼짐: ${java.util.Date(at)}")
+        }
+    }
+
+    private fun notifyScheduleFailed(name: String) {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel("schedule", "켜짐 예약", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        val open = PendingIntent.getActivity(
+            this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        val n = Notification.Builder(this, "schedule")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("켜짐 예약: $name 연결 실패")
+            .setContentText("네트워크를 확인하고 앱에서 다시 재생해 주세요.")
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        runCatching { nm.notify(2001, n) }
+    }
 
     // ---------------- 방송 정보 표시 ----------------
 
-    /** 제목 = 채널명, 아티스트 = 현재 프로그램 (웹앱과 같은 배치). 소리 끊김 없이 표시 정보만 교체 */
-    /** 큐의 모든 채널에 현재 프로그램 표시 (제목 = 채널명, 아티스트 = 프로그램). 재생은 그대로 */
     /** 큐의 모든 채널에 현재 프로그램 표시 + 재생 중 채널에만 로고 이미지 첨부. 재생은 그대로 */
     private suspend fun updateNowPlaying() {
         try {
@@ -410,6 +577,17 @@ class PlaybackService : MediaSessionService() {
 
     /** 재생 목록용 채널 (사용자 순서, 숨김 제외) */
     private suspend fun getChannels(): List<Channel> {
+        if (baseChannels == null) {
+            // 새로 뜬 서비스(예약 실행 등): 저장본으로 바로 시작하고 최신 설정은 뒤에서 받기
+            ChannelRepository.loadCached(this)?.let { cached ->
+                baseChannels = cached
+                baseLoadedAt = System.currentTimeMillis()
+                scope.launch {
+                    refreshBase(force = true)
+                    runCatching { getChannels() }
+                }
+            }
+        }
         refreshBase()
         val base = baseChannels ?: error("채널 설정을 불러올 수 없음")
         val p = ChannelPrefs.read(this)
@@ -489,7 +667,9 @@ class PlaybackService : MediaSessionService() {
 
     /** 재생 목록 전체를 방송 정보까지 채워서 생성 */
     private suspend fun playlistItems(list: List<Channel>, startIdx: Int): List<MediaItem> {
-        val epg = runCatching { EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true) }.getOrNull()
+        val epg = runCatching {
+            EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true, offline = true)
+        }.getOrNull()
         return list.mapIndexed { i, ch -> decoratedItem(ch, epg, i == startIdx) }
     }
 
@@ -534,11 +714,17 @@ class PlaybackService : MediaSessionService() {
             controller: MediaSession.ControllerInfo
         ): ListenableFuture<MediaSession.ConnectionResult> {
             Log.i("KRadio", "컨트롤러 연결: ${controller.packageName} (trusted=${controller.isTrusted})")
+            // 앱 화면이 연결됨 = 사용자가 앱을 연 상태 → 보류했던 오디오 포커스 처리를 다시 켬
+            val scheduled = controller.connectionHints.getBoolean("scheduled", false)
+            if (focusDeferred && controller.packageName == packageName && !scheduled) {
+                focusDeferred = false
+                exoPlayer?.setAudioAttributes(audioAttrs, true)
+                Log.i("KRadio", "오디오 포커스 처리 재개")
+            }
             return Futures.immediateFuture(
                 MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
             )
         }
-
         // 화면에서 채널 하나를 요청하면 → 전체 채널 목록 + 그 채널부터 재생
         override fun onSetMediaItems(
             mediaSession: MediaSession,

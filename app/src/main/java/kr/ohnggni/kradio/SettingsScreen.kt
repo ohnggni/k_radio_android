@@ -34,6 +34,8 @@ fun SettingsScreen(
     startupMode: String,
     startupChannel: String?,
     onSaveStartup: (String, String?) -> Unit,
+    scheduleSummary: String,
+    onOpenSchedules: () -> Unit,
 ) {
     var editConfig by remember { mutableStateOf(false) }
     var editEpg by remember { mutableStateOf(false) }
@@ -77,6 +79,11 @@ fun SettingsScreen(
                     else -> "재생 안 함"
                 },
                 onClick = { editStartup = true }
+            )
+            SettingRow(
+                title = "켜짐 예약",
+                value = scheduleSummary,
+                onClick = onOpenSchedules
             )
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))

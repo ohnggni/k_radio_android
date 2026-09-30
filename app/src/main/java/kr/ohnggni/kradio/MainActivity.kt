@@ -34,9 +34,13 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import androidx.compose.runtime.mutableIntStateOf
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
 
-private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE }
-
+private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE, SCHEDULE }
+private const val CONFIG_RECHECK_MS = 15 * 60_000L  // 앱이 앞으로 나올 때 이만큼 지났으면 설정 다시 확인
 class MainActivity : ComponentActivity() {
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
@@ -72,8 +76,17 @@ class MainActivity : ComponentActivity() {
     private var showSleep by mutableStateOf(false)
 
     private var appVolume by mutableIntStateOf(100)
-    // 꺼짐 예약 값이 바뀌면(설정·취소·종료) 즉시 재생기 표시에 반영
+
     private var volumeSync by mutableStateOf(false)
+
+    private var configLoadedAt = 0L   // 채널 설정을 마지막으로 받은 시각
+
+    private var schedules by mutableStateOf<List<PlaySchedule>>(emptyList())
+
+    // 켜짐 예약 실패 알림용 권한 (안드로이드 13 이상)
+    private val notifPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     private var sysVol by mutableIntStateOf(0)
     private var sysMax by mutableIntStateOf(15)
     private val audioManager by lazy { getSystemService(AudioManager::class.java) }
@@ -100,6 +113,8 @@ class MainActivity : ComponentActivity() {
         startupChannel = StartupSettings.fixedChannel(this)
         appVolume = AppVolume.get(this)
         volumeSync = AppVolume.isSync(this)
+        schedules = PlaySchedules.read(this)
+        ScheduleAlarms.rescheduleAll(this)
 
         customConfig = SourceSettings.customConfigUrl(this)
         customEpg = SourceSettings.customEpgUrl(this)
@@ -112,6 +127,7 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) {
                 status = "채널 정보를 불러올 수 없어요"
             }
+            configLoadedAt = System.currentTimeMillis()
             updateWarning()
             updateUpdateInfo()
             tryAutoStart()
@@ -120,7 +136,7 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
                     runCatching {
-                        EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity), force = true)
+                        EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity))
                     }.getOrNull()?.let { epg = it }
                     now = System.currentTimeMillis()
                     sleepAt = SleepTimer.get(this@MainActivity)
@@ -219,6 +235,9 @@ class MainActivity : ComponentActivity() {
                             startupMode = mode
                             startupChannel = id
                         },
+                        scheduleSummary = schedules.count { it.enabled }
+                            .let { if (it == 0) "없음" else "${it}개 켜짐" },
+                        onOpenSchedules = { screen = Screen.SCHEDULE },
                     )
 
                     Screen.MANAGE -> ChannelManageScreen(
@@ -240,6 +259,14 @@ class MainActivity : ComponentActivity() {
                         onResetAll = { resetAll() },
                     )
                     Screen.GUIDE -> GuideScreen(onBack = { screen = Screen.SETTINGS })
+                    Screen.SCHEDULE -> ScheduleScreen(
+                        schedules = schedules,
+                        channels = channels,
+                        epg = epg,
+                        onBack = { screen = Screen.SETTINGS },
+                        onSave = { saveSchedule(it) },
+                        onDelete = { deleteSchedule(it) },
+                    )
                 }
             }
         }
@@ -251,10 +278,20 @@ class MainActivity : ComponentActivity() {
         pendingAutoStart = !recreated
         recreated = false
         sleepAt = SleepTimer.get(this)
+        schedules = PlaySchedules.read(this)
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
             .registerOnSharedPreferenceChangeListener(sleepPrefListener)
         readSystemVolume()
         contentResolver.registerContentObserver(Settings.System.CONTENT_URI, true, volumeObserver)
+        // 설정을 받은 지 오래됐으면 다시 확인 (새 버전 알림, 방송 주소 변경 반영)
+        if (configLoadedAt > 0 && System.currentTimeMillis() - configLoadedAt > CONFIG_RECHECK_MS) {
+            lifecycleScope.launch {
+                runCatching { ChannelRepository.load(this@MainActivity) }.onSuccess { base = it }
+                configLoadedAt = System.currentTimeMillis()
+                updateWarning()
+                updateUpdateInfo()
+            }
+        }
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
         controllerFuture = future
@@ -302,8 +339,9 @@ class MainActivity : ComponentActivity() {
                     if (status.startsWith("채널 정보")) status = ""
                 }
             // 예상 못 한 오류가 나도 앱이 종료되지 않고 기존 편성표 유지
-            runCatching { EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity)) }
-                .getOrNull()?.let { epg = it }
+            runCatching {
+                EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity), force = true)
+            }.getOrNull()?.let { epg = it }
             now = System.currentTimeMillis()
             updateWarning()
             updateUpdateInfo()
@@ -467,6 +505,26 @@ class MainActivity : ComponentActivity() {
                 changeAppVolume(sp.getInt("app_before_mute", 100).takeIf { it > 0 } ?: 100)
             }
         }
+    }
+    // ---------------- 켜짐 예약 ----------------
+
+    private fun saveSchedule(s: PlaySchedule) {
+        val isNew = schedules.none { it.id == s.id }
+        schedules = schedules.filterNot { it.id == s.id } + s
+        PlaySchedules.write(this, schedules)
+        ScheduleAlarms.rescheduleAll(this)   // 시스템에 정시 실행 등록
+        // 실패 알림용 권한은 새 예약을 추가할 때만 물어봄 (스위치·수정·되돌리기 때는 안 물음)
+        if (isNew && Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun deleteSchedule(id: String) {
+        ScheduleAlarms.cancel(this, id)
+        schedules = schedules.filterNot { it.id == id }
+        PlaySchedules.write(this, schedules)
     }
     /** 꺼짐 예약 설정/해제. 이미 지났거나 1분 안에 오는 시각은 받지 않음 */
     private fun setSleep(at: Long?) {

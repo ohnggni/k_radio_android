@@ -1,6 +1,7 @@
 package kr.ohnggni.kradio
 
 import android.content.Context
+import org.json.JSONObject
 
 /** 데이터 출처 설정 (기본값은 화면에 주소를 노출하지 않음) */
 object SourceSettings {
@@ -121,5 +122,33 @@ object AppVolume {
 
     fun setSync(c: Context, on: Boolean) {
         sp(c).edit().putBoolean(KEY_SYNC, on).apply()
+    }
+}
+
+/** 켜짐 예약으로 켜는 중 표시 (서비스가 재생 시작을 확인하면 지움) */
+object ScheduledStart {
+    const val KEY = "sched_pending"
+
+    data class Pending(val channelName: String, val autoOff: Int, val volume: Int, val at: Long)
+
+    private fun sp(c: Context) = c.getSharedPreferences(ChannelPrefs.PREFS, Context.MODE_PRIVATE)
+
+    fun set(c: Context, channelName: String, autoOff: Int, volume: Int) {
+        val o = JSONObject()
+            .put("name", channelName)
+            .put("autoOff", autoOff)
+            .put("volume", volume)
+            .put("at", System.currentTimeMillis())
+        sp(c).edit().putString(KEY, o.toString()).apply()
+    }
+
+    /** 2분 넘게 지난 표시는 무효 */
+    fun get(c: Context): Pending? = runCatching {
+        val o = JSONObject(sp(c).getString(KEY, null)!!)
+        Pending(o.getString("name"), o.getInt("autoOff"), o.optInt("volume", 50), o.getLong("at"))
+    }.getOrNull()?.takeIf { System.currentTimeMillis() - it.at < 2 * 60_000L }
+
+    fun clear(c: Context) {
+        sp(c).edit().remove(KEY).apply()
     }
 }
