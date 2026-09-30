@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.4.0 (Unreleased)
+## 1.4.0 (2026-09-30)
 
 ### New
 - **Scheduled play ("켜짐 예약")** (Settings → Scheduled play): start a channel automatically at a set time.
