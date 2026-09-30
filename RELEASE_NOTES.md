@@ -4,6 +4,29 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.4.0 (Unreleased)
+
+### New
+- **Scheduled play ("켜짐 예약")** (Settings → Scheduled play): start a channel automatically at a set time.
+  - Multiple schedules, each with its own switch; repeat on selected weekdays or run once.
+  - Pick a channel, then optionally pick a program from the guide to fill in the start time and auto-off automatically.
+  - Sets the device media volume for the schedule and fades in over 10 seconds.
+  - Optional auto-off after 30/60/90 minutes or when the program ends (uses the auto-off timer).
+  - Works with the app closed and the screen off; survives reboots, app updates and time zone changes.
+  - Shows when the schedule will run next (e.g. "tomorrow 8:14 AM") to prevent AM/PM mistakes.
+  - Delete directly from the list, with undo.
+  - Notifications when the stream cannot be reached, when the device media volume is zero, or when the scheduled channel is hidden or deleted.
+
+### Improved
+- After a pause longer than 3 seconds (phone call, navigation voice, Bluetooth pause), playback resumes at the live point instead of playing stale buffered audio and then jumping ahead.
+- The channel config is checked again when the app comes to the foreground after 15 minutes, so update notices and stream changes appear without restarting the app.
+- The notification permission is requested only when adding a new schedule.
+
+### Technical
+- Target SDK set to 36 so scheduled playback can start from the background under Android 17 background audio restrictions (compiled against SDK 37).
+
+---
+
 ## 1.3.0 (2026-09-29)
 
 ### New
