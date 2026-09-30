@@ -436,7 +436,7 @@ private fun PlayerBar(
 /** 재생기 음량 슬라이더: 손잡이를 동그랗게 키우고 터치 영역을 넓힘 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun VolumeSlider(
+internal fun VolumeSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,

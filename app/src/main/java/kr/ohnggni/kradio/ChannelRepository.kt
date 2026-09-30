@@ -88,6 +88,12 @@ object ChannelRepository {
             parse(text)
         }
     }
+    /** 네트워크 없이 저장본만 읽기 (예약 실행처럼 바로 시작해야 할 때) */
+    fun loadCached(context: Context): List<Channel>? {
+        val url = SourceSettings.configUrl(context)
+        val cache = File(context.filesDir, "channels_cache_${url.hashCode()}.json")
+        return if (cache.exists()) runCatching { parse(cache.readText()) }.getOrNull() else null
+    }
 
     /** 일시적인 네트워크 실패 대비: 실패하면 2초 뒤 한 번 더 */
     private suspend fun fetchWithRetry(url: String): Result<String> {
