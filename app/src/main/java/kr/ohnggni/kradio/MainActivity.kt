@@ -38,6 +38,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.glance.appwidget.updateAll
 
 private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE, SCHEDULE }
 private const val CONFIG_RECHECK_MS = 15 * 60_000L  // 앱이 앞으로 나올 때 이만큼 지났으면 설정 다시 확인
@@ -83,6 +84,8 @@ class MainActivity : ComponentActivity() {
 
     private var schedules by mutableStateOf<List<PlaySchedule>>(emptyList())
 
+    private var pendingShortcutChannel: String? = null   // 바로가기로 열렸을 때 재생할 채널
+
     // 켜짐 예약 실패 알림용 권한 (안드로이드 13 이상)
     private val notifPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -99,6 +102,8 @@ class MainActivity : ComponentActivity() {
         if (key == SleepTimer.KEY) sleepAt = SleepTimer.get(this)
     }
 
+    private var scheduleBack = Screen.SETTINGS   // 켜짐 예약 화면에서 뒤로 갈 곳
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -109,6 +114,7 @@ class MainActivity : ComponentActivity() {
 
         // 폴드 접기/펴기 등으로 화면만 다시 만들어질 때는 자동 재생하지 않음
         recreated = savedInstanceState != null
+        handleShortcut(intent)
         startupMode = StartupSettings.mode(this)
         startupChannel = StartupSettings.fixedChannel(this)
         appVolume = AppVolume.get(this)
@@ -130,6 +136,8 @@ class MainActivity : ComponentActivity() {
             configLoadedAt = System.currentTimeMillis()
             updateWarning()
             updateUpdateInfo()
+            Shortcuts.update(this@MainActivity, channels, prefs.favorites)
+            tryPlayShortcut()
             tryAutoStart()
 
             // 화면이 보이는 동안 매 분 정각마다 편성 정보 갱신
@@ -149,7 +157,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             KRadioTheme {
                 BackHandler(enabled = screen != Screen.MAIN) {
-                    screen = if (screen == Screen.SETTINGS) Screen.MAIN else Screen.SETTINGS
+                    screen = when (screen) {
+                        Screen.SETTINGS -> Screen.MAIN
+                        Screen.SCHEDULE -> scheduleBack
+                        else -> Screen.SETTINGS
+                    }
                 }
 
                 when (screen) {
@@ -190,6 +202,11 @@ class MainActivity : ComponentActivity() {
                                 readSystemVolume()
                             },
                             onToggleMute = { toggleMute() },
+                            hasSchedules = schedules.any { it.enabled },
+                            onOpenSchedules = {
+                                scheduleBack = Screen.MAIN
+                                screen = Screen.SCHEDULE
+                            },
                         )
                         if (showSleep) {
                             SleepTimerDialog(
@@ -237,7 +254,10 @@ class MainActivity : ComponentActivity() {
                         },
                         scheduleSummary = schedules.count { it.enabled }
                             .let { if (it == 0) "없음" else "${it}개 켜짐" },
-                        onOpenSchedules = { screen = Screen.SCHEDULE },
+                        onOpenSchedules = {
+                            scheduleBack = Screen.SETTINGS
+                            screen = Screen.SCHEDULE
+                        },
                     )
 
                     Screen.MANAGE -> ChannelManageScreen(
@@ -245,6 +265,8 @@ class MainActivity : ComponentActivity() {
                         defaults = base.associateBy { it.id },
                         hidden = prefs.hidden,
                         overrides = prefs.overrides,
+                        favorites = prefs.favorites,
+                        onToggleFavorite = { toggleFavorite(it) },
                         onBack = { screen = Screen.SETTINGS },
                         onReorder = { ids -> updatePrefs(prefs.copy(order = ids)) },
                         onToggleVisible = { id, visible ->
@@ -263,7 +285,7 @@ class MainActivity : ComponentActivity() {
                         schedules = schedules,
                         channels = channels,
                         epg = epg,
-                        onBack = { screen = Screen.SETTINGS },
+                        onBack = { screen = scheduleBack },
                         onSave = { saveSchedule(it) },
                         onDelete = { deleteSchedule(it) },
                     )
@@ -315,6 +337,7 @@ class MainActivity : ComponentActivity() {
                     status = "연결 끊김 · 재연결 중..."
                 }
             })
+            tryPlayShortcut()
             tryAutoStart()
         }, MoreExecutors.directExecutor())
     }
@@ -404,6 +427,8 @@ class MainActivity : ComponentActivity() {
     private fun updatePrefs(newPrefs: ChannelPrefsData) {
         prefs = newPrefs
         ChannelPrefs.write(this, newPrefs)
+        Shortcuts.update(this, channels, newPrefs.favorites)   // 즐겨찾기·이름·로고·숨김 반영
+        lifecycleScope.launch { runCatching { WidgetUpdater.push(this@MainActivity) } }
     }
 
     private fun addCustom(name: String, url: String, logo: String?) {
@@ -428,9 +453,44 @@ class MainActivity : ComponentActivity() {
             prefs.copy(
                 custom = prefs.custom.filterNot { it.id == id },
                 order = prefs.order - id,
-                hidden = prefs.hidden - id
+                hidden = prefs.hidden - id,
+                favorites = prefs.favorites - id
             )
         )
+    }
+    private fun toggleFavorite(id: String) {
+        val favs = prefs.favorites
+        when {
+            id in favs -> updatePrefs(prefs.copy(favorites = favs - id))
+            favs.size >= ChannelPrefs.MAX_FAVORITES -> Toast.makeText(
+                this, "즐겨찾기는 ${ChannelPrefs.MAX_FAVORITES}개까지 지정할 수 있어요", Toast.LENGTH_SHORT
+            ).show()
+            else -> updatePrefs(prefs.copy(favorites = favs + id))
+        }
+    }
+
+    // ---------------- 바로가기 ----------------
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShortcut(intent)
+        tryPlayShortcut()
+    }
+
+    private fun handleShortcut(i: Intent?) {
+        if (i?.action == Shortcuts.ACTION_PLAY) {
+            pendingShortcutChannel = i.getStringExtra(Shortcuts.EXTRA_CHANNEL)
+            i.action = null   // 화면 회전 등으로 다시 처리되지 않게
+        }
+    }
+
+    private fun tryPlayShortcut() {
+        val id = pendingShortcutChannel ?: return
+        if (controller == null || channels.isEmpty()) return
+        pendingShortcutChannel = null
+        channels.firstOrNull { it.id == id }?.let { playChannel(it) }
+            ?: Toast.makeText(this, "채널을 찾을 수 없어요", Toast.LENGTH_SHORT).show()
     }
 
     /** 내 채널은 직접 수정, 기본 채널은 바뀐 항목만 따로 저장 */
@@ -538,6 +598,11 @@ class MainActivity : ComponentActivity() {
     }
     /** 앱이 앞으로 나왔을 때 설정에 따라 자동 재생 */
     private fun tryAutoStart() {
+        // 바로가기로 연 경우엔 시작 시 재생 설정보다 바로가기 채널이 우선
+        if (pendingShortcutChannel != null) {
+            pendingAutoStart = false
+            return
+        }
         if (!pendingAutoStart) return
         val c = controller ?: return
         if (channels.isEmpty()) return

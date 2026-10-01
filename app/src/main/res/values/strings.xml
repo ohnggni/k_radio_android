@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">KRadio</string>
+    <string name="widget_desc">재생 조작과 즐겨찾기. 버튼 반응은 앱보다 조금 늦을 수 있어요.</string>
 </resources>

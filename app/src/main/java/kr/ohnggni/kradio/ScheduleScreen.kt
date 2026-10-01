@@ -265,12 +265,15 @@ private fun ScheduleEditDialog(
                         Hint("지금 $nowText")
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TimeNumberField(hText) { hText = it; label = null }
-                        Text(" : ", style = MaterialTheme.typography.titleLarge)
-                        TimeNumberField(mText) { mText = it; label = null }
+                        TimeStepper(hText, mText) { h, m ->
+                            hText = h
+                            mText = m
+                            label = null   // 손으로 바꾸면 방송 선택 표시 해제
+                        }
                         // 입력한 시각이 실제로 언제인지 풀어서 표시 (오전·오후 실수 방지)
                         if (hour != null && minute != null) {
                             val next = PlaySchedule(hour = hour, minute = minute, days = days).nextTrigger()
+                            Spacer(Modifier.width(12.dp))
                             Hint("→ ${nextTriggerLabel(next)}")
                         }
                     }

@@ -94,48 +94,60 @@ class ScheduleReceiver : BroadcastReceiver() {
         }
     }
 }
-/** 예약 시각에 음량을 맞추고 재생을 요청 */
+/** 백그라운드에서 채널 하나 틀기 (켜짐 예약·위젯 즐겨찾기 공용) */
 object ScheduleStarter {
-    fun start(c: Context, s: PlaySchedule, done: () -> Unit) {
-        // 1. 폰 미디어 음량을 예약 값으로
 
+    /** 켜짐 예약: 예약 음량으로 맞추고 서서히 커지며 시작 */
+    fun start(c: Context, s: PlaySchedule, done: () -> Unit) = playChannel(
+        c, s.channelId, s.label, s.autoOff, volume = s.volume, fade = true, source = "켜짐 예약", done = done
+    )
 
-        // 2. 앱 음량이 음소거(0%)면 100%로
-        if (AppVolume.get(c) == 0) AppVolume.set(c, 100)
-
-        // 3. 서비스에 '예약으로 켜는 중' 표시 (서서히 커지기, 자동 꺼짐, 실패 알림용)
+    fun playChannel(
+        c: Context,
+        channelId: String,
+        label: String?,
+        autoOff: Int,
+        volume: Int?,          // null이면 폰 음량 그대로
+        fade: Boolean,
+        source: String,
+        done: () -> Unit,
+    ) {
         // 채널 확인: 숨기거나 삭제한 채널이면 엉뚱한 채널을 틀지 않고 알림만
         val base = ChannelRepository.loadCached(c)
         val channelPrefs = ChannelPrefs.read(c)
         val all = base?.let { ChannelPrefs.applyOrder(it, channelPrefs) }
         val visible = base?.let { ChannelPrefs.visible(it, channelPrefs) }
-        val name = all?.firstOrNull { it.id == s.channelId }?.name ?: s.label ?: "예약한 채널"
-        if (visible != null && visible.none { it.id == s.channelId }) {
-            Log.w("KRadio", "켜짐 예약 건너뜀: $name (숨김 또는 삭제)")
+        val name = all?.firstOrNull { it.id == channelId }?.name ?: label ?: "예약한 채널"
+        if (visible != null && visible.none { it.id == channelId }) {
+            Log.w("KRadio", "$source 건너뜀: $name (숨김 또는 삭제)")
             ScheduleNotifier.show(
                 c, 2003,
-                "켜짐 예약: 채널을 찾을 수 없어요",
-                "$name 채널이 숨김 또는 삭제된 상태라 켜지 않았어요. 켜짐 예약에서 채널을 다시 골라주세요."
+                "$source: 채널을 찾을 수 없어요",
+                "$name 채널이 숨김 또는 삭제된 상태라 켜지 않았어요."
             )
             done()
             return
         }
-        ScheduledStart.set(c, name, s.autoOff, s.volume)   // 음량은 재생 시작 후 서비스가 맞춤
 
-        // 4. 재생 요청
+        // 앱 음량이 음소거(0%)면 100%로
+        if (AppVolume.get(c) == 0) AppVolume.set(c, 100)
+
+        // 서비스에 '백그라운드에서 켜는 중' 표시 (포커스 보류, 음량, 서서히 커지기, 자동 꺼짐, 실패 알림)
+        ScheduledStart.set(c, name, autoOff, volume ?: -1, fade)
+
         val future = MediaController.Builder(
             c, SessionToken(c, ComponentName(c, PlaybackService::class.java))
         )
-            .setConnectionHints(Bundle().apply { putBoolean("scheduled", true) })  // 예약 실행기임을 표시
+            .setConnectionHints(Bundle().apply { putBoolean("scheduled", true) })
             .buildAsync()
         future.addListener({
             runCatching {
                 val ctl = future.get()
-                ctl.setMediaItem(MediaItem.Builder().setMediaId(s.channelId).build())
+                ctl.setMediaItem(MediaItem.Builder().setMediaId(channelId).build())
                 ctl.prepare()
                 ctl.play()
-                Log.i("KRadio", "켜짐 예약 재생 요청: $name (음량 ${s.volume}%)")
-            }.onFailure { Log.e("KRadio", "켜짐 예약 재생 요청 실패", it) }
+                Log.i("KRadio", "$source 재생 요청: $name")
+            }.onFailure { Log.e("KRadio", "$source 재생 요청 실패", it) }
             // 서비스가 재생을 시작할 시간을 준 뒤 연결 해제
             Handler(Looper.getMainLooper()).postDelayed({
                 MediaController.releaseFuture(future)
@@ -146,15 +158,22 @@ object ScheduleStarter {
 }
 /** 켜짐 예약 관련 알림 */
 object ScheduleNotifier {
-    fun show(c: Context, id: Int, title: String, text: String) {
+    fun show(
+        c: Context,
+        id: Int,
+        title: String,
+        text: String,
+        channel: String = "schedule",
+        channelName: String = "켜짐 예약",
+    ) {
         val nm = c.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel("schedule", "켜짐 예약", NotificationManager.IMPORTANCE_DEFAULT)
+            NotificationChannel(channel, channelName, NotificationManager.IMPORTANCE_DEFAULT)
         )
         val open = PendingIntent.getActivity(
             c, id, Intent(c, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
-        val n = Notification.Builder(c, "schedule")
+        val n = Notification.Builder(c, channel)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
             .setContentText(text)
