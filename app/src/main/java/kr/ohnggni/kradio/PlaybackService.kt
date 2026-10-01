@@ -50,6 +50,8 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 
+const val ACTION_WIDGET_STOP = "kr.ohnggni.kradio.widget.STOP"
+const val ACTION_WIDGET_PLAY_CHANNEL = "kr.ohnggni.kradio.widget.PLAY_CHANNEL_DIRECT"
 private const val SCHEME = "kradio"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
 private const val MAX_RETRY_DELAY_MS = 30_000L       // 재연결 최대 대기 간격
@@ -417,8 +419,8 @@ class PlaybackService : MediaSessionService() {
             vol = am.getStreamVolume(AudioManager.STREAM_MUSIC),
             volMax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
         )
-        // 이미 위젯에 저장된 값과 같으면 다시 그리지 않음 (위젯 버튼이 먼저 그린 경우 중복 방지)
-        if (data == lastWidget || data == WidgetState.read(this)) {
+        // 위젯에 저장된 값과 같을 때만 건너뜀 (위젯 버튼이 미리 바꾼 모양이 실제와 다르면 바로잡음)
+        if (data == WidgetState.read(this)) {
             lastWidget = data
             return
         }
@@ -896,6 +898,48 @@ class PlaybackService : MediaSessionService() {
             }
             return future
         }
+    }
+    // 위젯 정지 버튼: 서비스에 직접 와서 연결 대기 없이 바로 정지
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_WIDGET_STOP) {
+            exoPlayer?.let {
+                it.pause()
+                it.stop()
+            }
+            // 정지 직후 위젯을 한 번 더 누른 게 '재생'으로 처리되지 않게
+            prefs.edit().putLong("widget_pp_at", System.currentTimeMillis()).apply()
+            Log.i("KRadio", "위젯: 정지")
+            return START_NOT_STICKY
+        }
+        // 위젯 즐겨찾기 (재생 중일 때): 연결 대기 없이 바로 그 채널로
+        if (intent?.action == ACTION_WIDGET_PLAY_CHANNEL) {
+            val id = intent.getStringExtra(Shortcuts.EXTRA_CHANNEL)
+            val exo = exoPlayer
+            if (id != null && exo != null) {
+                val idx = (0 until exo.mediaItemCount).firstOrNull { exo.getMediaItemAt(it).mediaId == id }
+                if (idx != null) {
+                    exo.seekTo(idx, C.TIME_UNSET)   // 재생 목록 안에서 바로 이동
+                    if (exo.playbackState == Player.STATE_IDLE) exo.prepare()
+                    exo.play()
+                } else {
+                    // 목록에 없으면 (설정이 바뀐 경우 등) 목록을 새로 만들어서 재생
+                    scope.launch {
+                        runCatching {
+                            val list = getChannels()
+                            val i = list.indexOfFirst { it.id == id }
+                            if (i >= 0) {
+                                exo.setMediaItems(playlistItems(list, i), i, C.TIME_UNSET)
+                                exo.prepare()
+                                exo.play()
+                            }
+                        }
+                    }
+                }
+                Log.i("KRadio", "위젯: 즐겨찾기 $id")
+            }
+            return START_NOT_STICKY
+        }
+        return super.onStartCommand(intent, flags, startId)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =

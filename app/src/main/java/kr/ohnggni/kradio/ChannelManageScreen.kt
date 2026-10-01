@@ -79,7 +79,7 @@ fun ChannelManageScreen(
         ) {
             item {
                 Text(
-                    "≡ 끌어서 순서 변경 · ☆ 즐겨찾기 (최대 4개, 앱 아이콘 꾹 누르기에 표시) · 채널을 눌러 수정 · 스위치로 표시/숨김",
+                    "≡ 끌어서 순서 변경 · ☆ 즐겨찾기 (최대 ${ChannelPrefs.MAX_FAVORITES}개, 앱 아이콘 꾹 누르기에 표시) · 채널을 눌러 수정 · 스위치로 표시/숨김",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
