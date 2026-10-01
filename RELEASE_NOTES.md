@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.5.0 (Unreleased)
+## 1.5.0 (2026-10-01)
 
 ### New
 - **Home screen widget**: channel, program and logo; previous / play-stop / next.
