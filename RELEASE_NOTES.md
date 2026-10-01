@@ -4,6 +4,27 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.5.0 (Unreleased)
+
+### New
+- **Home screen widget**: channel, program and logo; previous / play-stop / next.
+  - Larger sizes add device media volume buttons with a step gauge, up to 3 favorite channels (play directly without opening the app), and a date/clock.
+  - Play from the widget resumes the channel shown on the widget.
+- **Favorites** (star in channel management, up to 3): shown as app icon shortcuts (long press) and on the widget.
+- Auto-off and scheduled play buttons in the top banner.
+- Up/down buttons for all time inputs (hours by 1, minutes by 5; hold to repeat).
+- Playback stops automatically after 3 minutes of muted playback (app volume 0% or device media volume 0), with a notification.
+
+### Improved
+- Player bar: channel name and playback state on one line, larger controls aligned with the logo.
+- Auto-off now starts fading at the set time (then stops 10 seconds later), to account for the delay of internet streams.
+- Scheduled play: next run shown next to the time input.
+
+### Fixed
+- Channel logo missing on Android Auto and other external displays.
+
+---
+
 ## 1.4.0 (2026-09-30)
 
 ### New
