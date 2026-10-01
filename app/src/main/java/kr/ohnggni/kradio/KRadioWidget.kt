@@ -69,6 +69,7 @@ import android.widget.RemoteViews
 import androidx.compose.ui.graphics.toArgb
 import androidx.glance.appwidget.AndroidRemoteViews
 import kotlinx.coroutines.delay
+import androidx.glance.appwidget.action.actionStartService
 
 // ---------------- 위젯에 표시할 상태 ----------------
 
@@ -174,6 +175,19 @@ class WidgetActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext
         val pending = goAsync()
+        // 재생/정지: 중복 누름 무시 + 누르는 즉시 버튼 모양부터 바꿈
+        if (intent.action == ACTION_PLAY_PAUSE) {
+            val sp = app.getSharedPreferences(ChannelPrefs.PREFS, Context.MODE_PRIVATE)
+            val now = System.currentTimeMillis()
+            if (now - sp.getLong("widget_pp_at", 0L) < 1_200L) {
+                pending.finish()
+                return
+            }
+            sp.edit().putLong("widget_pp_at", now).apply()
+            val st = WidgetState.read(app)
+            WidgetState.save(app, st.copy(playing = !st.playing))
+            CoroutineScope(Dispatchers.Main).launch { runCatching { WidgetUpdater.push(app) } }
+        }
         when (val action = intent.action) {
             ACTION_VOL_UP, ACTION_VOL_DOWN -> {
                 val am = app.getSystemService(AudioManager::class.java)
@@ -406,7 +420,19 @@ class KRadioWidget : GlanceAppWidget() {
                                 .height(38.dp)
                                 .cornerRadius(19.dp)
                                 .background(if (on) colors.primary else colors.secondaryContainer)
-                                .clickable(playChannelAction(c, id)),
+                                .clickable(
+                                    // 재생 중: 서비스에 직접 (빠름) / 정지 중: 수신기를 거쳐 재생 시작
+                                    if (st.playing) {
+                                        actionStartService(
+                                            Intent(c, PlaybackService::class.java)
+                                                .setAction(ACTION_WIDGET_PLAY_CHANNEL)
+                                                .setData(Uri.parse("kradio://widget/svc/$id"))   // 채널마다 구분되게
+                                                .putExtra(Shortcuts.EXTRA_CHANNEL, id)
+                                        )
+                                    } else {
+                                        playChannelAction(c, id)
+                                    }
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -435,7 +461,14 @@ class KRadioWidget : GlanceAppWidget() {
             RoundButton(
                 if (st.playing) R.drawable.ic_w_stop else R.drawable.ic_w_play,
                 if (st.playing) "정지" else "재생",
-                broadcast(c, WidgetActionReceiver.ACTION_PLAY_PAUSE),
+                // 재생 중: 서비스에 직접 정지 (빠름) / 정지 중: 수신기를 거쳐 재생
+                if (st.playing) {
+                    actionStartService(
+                        Intent(c, PlaybackService::class.java).setAction(ACTION_WIDGET_STOP)
+                    )
+                } else {
+                    broadcast(c, WidgetActionReceiver.ACTION_PLAY_PAUSE)
+                },
                 50.dp,
                 filled = true
             )
