@@ -24,6 +24,8 @@ fun ChannelManageScreen(
     defaults: Map<String, Channel>,      // GitHub 원본 (기본 채널 판단·기본값 표시용)
     hidden: Set<String>,
     overrides: Map<String, ChannelOverride>,  // 기본 채널 수정 내용
+    favorites: List<String>,
+    onToggleFavorite: (String) -> Unit,
     onBack: () -> Unit,
     onReorder: (List<String>) -> Unit,
     onToggleVisible: (String, Boolean) -> Unit,
@@ -77,7 +79,7 @@ fun ChannelManageScreen(
         ) {
             item {
                 Text(
-                    "≡ 끌어서 순서 변경 · 채널을 눌러 수정 · 스위치로 표시/숨김",
+                    "≡ 끌어서 순서 변경 · ☆ 즐겨찾기 (최대 4개, 앱 아이콘 꾹 누르기에 표시) · 채널을 눌러 수정 · 스위치로 표시/숨김",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -130,6 +132,14 @@ fun ChannelManageScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (ch.id in edited) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            val fav = ch.id in favorites
+                            IconButton(onClick = { onToggleFavorite(ch.id) }) {
+                                Icon(
+                                    if (fav) IconStarOn else IconStarOff,
+                                    contentDescription = if (fav) "즐겨찾기 해제" else "즐겨찾기",
+                                    tint = if (fav) MaterialTheme.colorScheme.primary else LocalContentColor.current
                                 )
                             }
                             if (isCustom) {
@@ -326,4 +336,12 @@ private val IconDrag = svgIcon("drag", "M20,9H4v2h16V9zM4,15h16v-2H4v2z")
 private val IconDelete = svgIcon(
     "delete",
     "M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2,-0.9 2,-2V7H6v12zM19,4h-3.5l-1,-1h-5l-1,1H5v2h14V4z"
+)
+private val IconStarOn = svgIcon(
+    "star_on",
+    "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z"
+)
+private val IconStarOff = svgIcon(
+    "star_off",
+    "M22,9.24l-7.19,-0.62L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21 12,17.27 18.18,21l-1.63,-7.03L22,9.24zM12,15.4l-3.76,2.27 1,-4.28 -3.32,-2.88 4.38,-0.38L12,6.1l1.71,4.04 4.38,0.38 -3.32,2.88 1,4.28L12,15.4z"
 )

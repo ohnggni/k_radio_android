@@ -19,12 +19,14 @@ data class ChannelPrefsData(
     val hidden: Set<String> = emptySet(),
     val custom: List<Channel> = emptyList(),
     val overrides: Map<String, ChannelOverride> = emptyMap(),
+    val favorites: List<String> = emptyList(),   // 즐겨찾기 채널 ID (최대 4개)
 )
 
 object ChannelPrefs {
     const val PREFS = "kradio"
     const val KEY = "channel_prefs"
     const val CUSTOM_GROUP = "내 채널"
+    const val MAX_FAVORITES = 3
 
     fun read(context: Context): ChannelPrefsData {
         val text = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -59,7 +61,8 @@ object ChannelPrefs {
                 }
             } ?: emptyMap()
 
-            ChannelPrefsData(strList("order"), strList("hidden").toSet(), custom, overrides)
+            ChannelPrefsData(strList("order"), strList("hidden").toSet(), custom, overrides,
+                strList("favorites").take(MAX_FAVORITES))
         }.getOrElse { ChannelPrefsData() }
     }
 
@@ -67,6 +70,7 @@ object ChannelPrefs {
         val o = JSONObject()
         o.put("order", JSONArray(data.order))
         o.put("hidden", JSONArray(data.hidden.toList()))
+        o.put("favorites", JSONArray(data.favorites))
         o.put("custom", JSONArray().apply {
             data.custom.forEach { c ->
                 put(JSONObject().apply {

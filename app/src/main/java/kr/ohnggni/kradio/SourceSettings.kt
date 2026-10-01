@@ -125,19 +125,27 @@ object AppVolume {
     }
 }
 
-/** 켜짐 예약으로 켜는 중 표시 (서비스가 재생 시작을 확인하면 지움) */
+/** 예약·위젯 등 백그라운드에서 켜는 중 표시 (서비스가 재생 시작을 확인하면 지움) */
 object ScheduledStart {
     const val KEY = "sched_pending"
 
-    data class Pending(val channelName: String, val autoOff: Int, val volume: Int, val at: Long)
+    /** volume = -1이면 폰 음량을 건드리지 않음, fade = 서서히 커지기 */
+    data class Pending(
+        val channelName: String,
+        val autoOff: Int,
+        val volume: Int,
+        val fade: Boolean,
+        val at: Long,
+    )
 
     private fun sp(c: Context) = c.getSharedPreferences(ChannelPrefs.PREFS, Context.MODE_PRIVATE)
 
-    fun set(c: Context, channelName: String, autoOff: Int, volume: Int) {
+    fun set(c: Context, channelName: String, autoOff: Int, volume: Int, fade: Boolean) {
         val o = JSONObject()
             .put("name", channelName)
             .put("autoOff", autoOff)
             .put("volume", volume)
+            .put("fade", fade)
             .put("at", System.currentTimeMillis())
         sp(c).edit().putString(KEY, o.toString()).apply()
     }
@@ -145,7 +153,13 @@ object ScheduledStart {
     /** 2분 넘게 지난 표시는 무효 */
     fun get(c: Context): Pending? = runCatching {
         val o = JSONObject(sp(c).getString(KEY, null)!!)
-        Pending(o.getString("name"), o.getInt("autoOff"), o.optInt("volume", 50), o.getLong("at"))
+        Pending(
+            o.getString("name"),
+            o.getInt("autoOff"),
+            o.optInt("volume", -1),
+            o.optBoolean("fade", true),
+            o.getLong("at")
+        )
     }.getOrNull()?.takeIf { System.currentTimeMillis() - it.at < 2 * 60_000L }
 
     fun clear(c: Context) {

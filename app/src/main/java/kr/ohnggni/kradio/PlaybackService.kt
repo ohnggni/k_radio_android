@@ -45,6 +45,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.media.AudioManager
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 
 private const val SCHEME = "kradio"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
@@ -110,6 +114,12 @@ class PlaybackService : MediaSessionService() {
 
     private var focusDeferred = false   // 예약 재생 중: 앱을 열 때까지 오디오 포커스 요청 보류
 
+    private var lastWidget: WidgetState.Data? = null
+    private var silenceJob: Job? = null
+    // 폰 볼륨 버튼으로 음량이 바뀌면 위젯 음량 막대도 갱신
+    private val volumeObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) = updateWidget()
+    }
     private var pausedAt = 0L   // 멈춘 시각 (재개할 때 라이브 지점으로 갈지 판단)
 
     // 오디오 속성 (예약 재생 때 포커스 처리를 잠시 껐다 켜기 위해 보관)
@@ -173,6 +183,7 @@ class PlaybackService : MediaSessionService() {
                 if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                     cancelRetry()
                     scope.launch { updateNowPlaying() }
+                updateWidget()
                 }
             }
 
@@ -190,8 +201,14 @@ class PlaybackService : MediaSessionService() {
                     ScheduledStart.get(this@PlaybackService)?.let { p ->
                         ScheduledStart.clear(this@PlaybackService)
                         scheduleWatchJob?.cancel()
-                        applyScheduledVolume(p.channelName, p.volume)
-                        fadeIn()
+                        if (p.volume >= 0) applyScheduledVolume(p.channelName, p.volume)
+                        if (p.fade) {
+                            fadeIn()
+                        } else {
+                            // 위젯 등: 바로 원래 음량으로
+                            fadingIn = false
+                            exoPlayer?.volume = baseVolume
+                        }
                         scope.launch {
                             applyAutoOff(p.autoOff)
                             // 포그라운드 서비스가 된 뒤 포커스 처리 재개 (targetSdk 36 기준 허용)
@@ -224,6 +241,7 @@ class PlaybackService : MediaSessionService() {
                 } else {
                     resumeAtLiveEdgeIfStale()
                 }
+                updateWidget()
             }
 
             // 통화·내비 음성 등으로 잠시 소리를 양보했다가 돌아올 때
@@ -297,6 +315,8 @@ class PlaybackService : MediaSessionService() {
         }
         scheduleSleep()
         applyVolume()
+        contentResolver.registerContentObserver(Settings.System.CONTENT_URI, true, volumeObserver)
+        watchSilence()
     }
 
     // ---------------- 자동 재연결 ----------------
@@ -340,6 +360,72 @@ class PlaybackService : MediaSessionService() {
         exo.seekToDefaultPosition()
         Log.i("KRadio", "재개: 라이브 지점으로 이동 (${(System.currentTimeMillis() - paused) / 1000}초 멈춤)")
     }
+    // ---------------- 무음 재생 감지 ----------------
+
+    /** 소리가 꺼진 채로 3분 재생되면 배터리 절약을 위해 정지 */
+    private fun watchSilence() {
+        silenceJob?.cancel()
+        silenceJob = scope.launch {
+            var mutedSince = 0L
+            while (true) {
+                delay(15_000)
+                val exo = exoPlayer ?: break
+                if (!exo.isPlaying) {
+                    mutedSince = 0L
+                    continue
+                }
+                val am = getSystemService(AudioManager::class.java)
+                // 차량(안드로이드 오토 등)이 음량을 관리할 때는 폰 음량 값을 믿을 수 없어서 무시
+                val sysMuted = !am.isVolumeFixed &&
+                        (am.getStreamVolume(AudioManager.STREAM_MUSIC) == 0 || am.isStreamMute(AudioManager.STREAM_MUSIC))
+                val muted = AppVolume.get(this@PlaybackService) == 0 || sysMuted
+                if (!muted) {
+                    mutedSince = 0L
+                    continue
+                }
+                if (mutedSince == 0L) mutedSince = System.currentTimeMillis()
+                if (System.currentTimeMillis() - mutedSince >= 3 * 60_000L) {
+                    Log.i("KRadio", "무음 재생 3분 → 자동 정지")
+                    exo.pause()
+                    exo.stop()
+                    ScheduleNotifier.show(
+                        this@PlaybackService, 2004,
+                        "케이라디오를 정지했어요",
+                        "소리가 꺼진 채로 3분 동안 재생되어 배터리 절약을 위해 정지했어요.",
+                        channel = "general",
+                        channelName = "재생 안내"
+                    )
+                    mutedSince = 0L
+                }
+            }
+        }
+    }
+    // ---------------- 위젯 ----------------
+
+    /** 지금 채널·방송·재생 상태를 위젯에 반영 (바뀐 게 있을 때만) */
+    private fun updateWidget() {
+        val exo = exoPlayer ?: return
+        val item = exo.currentMediaItem
+        val ch = allChannels.firstOrNull { it.id == item?.mediaId }
+        val am = getSystemService(AudioManager::class.java)
+        val data = WidgetState.Data(
+            channelId = item?.mediaId,
+            name = ch?.name ?: item?.mediaMetadata?.title?.toString() ?: "케이라디오",
+            program = item?.mediaMetadata?.artist?.toString().orEmpty(),
+            playing = exo.playWhenReady,
+            logo = ch?.logo,
+            vol = am.getStreamVolume(AudioManager.STREAM_MUSIC),
+            volMax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+        )
+        // 이미 위젯에 저장된 값과 같으면 다시 그리지 않음 (위젯 버튼이 먼저 그린 경우 중복 방지)
+        if (data == lastWidget || data == WidgetState.read(this)) {
+            lastWidget = data
+            return
+        }
+        lastWidget = data
+        WidgetState.save(this, data)
+        scope.launch { runCatching { WidgetUpdater.push(this@PlaybackService) } }
+    }
     // ---------------- 취침 타이머 ----------------
 
     /** 설정된 시각이 되면 10초 동안 소리를 줄인 뒤 정지 */
@@ -352,7 +438,8 @@ class PlaybackService : MediaSessionService() {
             return
         }
         sleepJob = scope.launch {
-            val wait = at - SleepTimer.FADE_MS - System.currentTimeMillis()
+            // 인터넷 방송은 몇 초 늦게 나오므로, 정한 시각에 줄이기 시작해서 10초 뒤 정지
+            val wait = at - System.currentTimeMillis()
             if (wait > 0) delay(wait)
             val exo = exoPlayer ?: return@launch
             fadingOut = true
@@ -557,6 +644,7 @@ class PlaybackService : MediaSessionService() {
             if (!changed) return
             // 모든 항목의 주소가 그대로라 재생 중인 채널도 끊기지 않고 표시 정보만 바뀜
             exo.replaceMediaItems(0, count, items)
+            updateWidget()
             Log.i("KRadio", "방송 정보 갱신: ${count}개 채널")
         } catch (e: Exception) {
             Log.w("KRadio", "방송 정보 갱신 실패: ${e.message}")
@@ -638,7 +726,8 @@ class PlaybackService : MediaSessionService() {
                 MediaMetadata.Builder()
                     .setTitle(ch.name)
                     .setArtist(ch.group)
-                    .setArtworkUri(ch.logo?.let { Uri.parse(it) }) // ← 추가
+                    // 내장 로고(asset://)는 오토·워치가 못 열어서 넘기지 않음 (이미지 데이터로 따로 전달)
+                    .setArtworkUri(ch.logo?.takeIf { it.startsWith("http") }?.let { Uri.parse(it) })
                     .build()
             )
         if (ch.type == "api" || ch.url?.contains(".m3u8") == true) {
@@ -825,6 +914,7 @@ class PlaybackService : MediaSessionService() {
             .unregisterOnSharedPreferenceChangeListener(prefsListener)
         loudness?.release()
         loudness = null
+        contentResolver.unregisterContentObserver(volumeObserver)
         scope.cancel()
         mediaSession?.run {
             player.release()

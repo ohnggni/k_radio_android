@@ -28,18 +28,23 @@ fun SleepTimerDialog(
 
     // ---------- 시각 지정 화면 ----------
     if (pickTime) {
-        val cal = remember { Calendar.getInstance() }
-        val state = rememberTimePickerState(
-            initialHour = cal.get(Calendar.HOUR_OF_DAY),
-            initialMinute = cal.get(Calendar.MINUTE),
-            is24Hour = true
-        )
+        // 처음 값: 지금부터 30분 뒤를 5분 단위로 올림
+        val init = remember {
+            val c = Calendar.getInstance().apply { add(Calendar.MINUTE, 30) }
+            val total = ((c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE) + 4) / 5 * 5) % 1440
+            "%02d".format(total / 60) to "%02d".format(total % 60)
+        }
+        var hText by remember { mutableStateOf(init.first) }
+        var mText by remember { mutableStateOf(init.second) }
+        val h = hText.toIntOrNull()?.takeIf { it in 0..23 }
+        val m = mText.toIntOrNull()?.takeIf { it in 0..59 }
+
         AlertDialog(
             onDismissRequest = { pickTime = false },
-            title = { Text("꺼짐 시각") },
+            title = { Text("꺼질 시각") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TimeInput(state = state)
+                    TimeStepper(hText, mText) { nh, nm -> hText = nh; mText = nm }
                     Text(
                         "이미 지난 시각이면 다음 날로 설정돼요.",
                         style = MaterialTheme.typography.bodySmall,
@@ -48,7 +53,10 @@ fun SleepTimerDialog(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { onSetAt(nextTimeAt(state.hour, state.minute)) }) { Text("설정") }
+                TextButton(
+                    enabled = h != null && m != null,
+                    onClick = { onSetAt(nextTimeAt(h!!, m!!)) }
+                ) { Text("설정") }
             },
             dismissButton = { TextButton(onClick = { pickTime = false }) { Text("취소") } }
         )
@@ -136,7 +144,7 @@ fun SleepTimerDialog(
                 }
 
                 Text(
-                    "꺼지기 전 10초 동안 소리가 서서히 줄어들어요. 직접 정지하면 예약도 취소돼요.",
+                    "정한 시각부터 10초 동안 소리가 서서히 줄어든 뒤 꺼져요. 직접 정지하면 예약도 취소돼요.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)

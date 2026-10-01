@@ -6,6 +6,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,6 +26,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -68,7 +71,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
-import androidx.compose.foundation.systemGestureExclusion
 
 // ---------------- 메인 화면 ----------------
 
@@ -100,13 +102,23 @@ fun MainScreen(
     onSysVolume: (Int) -> Unit,
     onToggleSync: (Boolean) -> Unit,
     onToggleMute: () -> Unit,
+    hasSchedules: Boolean,
+    onOpenSchedules: () -> Unit,
 ) {
     val current = channels.firstOrNull { it.id == currentId }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             Column {
-                TopBanner(now, onOpenSettings)
+                TopBanner(
+                    now = now,
+                    onSettings = onOpenSettings,
+                    isOn = isOn,
+                    sleepAt = sleepAt,
+                    hasSchedules = hasSchedules,
+                    onOpenSleep = onOpenSleep,
+                    onOpenSchedules = onOpenSchedules,
+                )
                 warning?.let { WarningCard(it, onOpenSettings) }
                 updateNotice?.let { UpdateCard(it, onUpdate, onDismissUpdate) }
             }
@@ -123,7 +135,6 @@ fun MainScreen(
                 onNext = onNext,
                 now = now,
                 sleepAt = sleepAt,
-                onOpenSleep = onOpenSleep,
                 appVolume = appVolume,
                 volumeSync = volumeSync,
                 sysVol = sysVol,
@@ -191,17 +202,25 @@ private fun UpdateCard(text: String, onUpdate: () -> Unit, onDismiss: () -> Unit
     }
 }
 @Composable
-private fun TopBanner(now: Long, onSettings: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()                     // 상태표시줄은 침범하지 않고
-            .background(
-                Brush.horizontalGradient(listOf(cs.primaryContainer, cs.secondaryContainer))
-            )
-            .padding(horizontal = 20.dp, vertical = 14.dp)
-    ) {
+private fun TopBanner(
+    now: Long,
+    onSettings: () -> Unit,
+    isOn: Boolean,
+    sleepAt: Long?,
+    hasSchedules: Boolean,
+    onOpenSleep: () -> Unit,
+    onOpenSchedules: () -> Unit,
+) {
+        val cs = MaterialTheme.colorScheme
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .background(
+                    Brush.horizontalGradient(listOf(cs.primaryContainer, cs.secondaryContainer))
+                )
+                .padding(horizontal = 20.dp, vertical = 14.dp)
+        ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 IconRadio,
@@ -220,6 +239,22 @@ private fun TopBanner(now: Long, onSettings: () -> Unit) {
                     dateFmt.format(Date(now)),
                     style = MaterialTheme.typography.labelMedium,
                     color = cs.onPrimaryContainer.copy(alpha = 0.75f)
+                )
+            }
+            IconButton(onClick = onOpenSleep, enabled = isOn) {
+                Icon(
+                    IconSleep,
+                    contentDescription = "꺼짐 예약",
+                    tint = if (sleepAt != null) MaterialTheme.colorScheme.primary
+                    else LocalContentColor.current
+                )
+            }
+            IconButton(onClick = onOpenSchedules) {
+                Icon(
+                    IconAlarm,
+                    contentDescription = "켜짐 예약",
+                    tint = if (hasSchedules) MaterialTheme.colorScheme.primary
+                    else LocalContentColor.current
                 )
             }
             IconButton(onClick = onSettings) {
@@ -298,7 +333,6 @@ private fun PlayerBar(
     onNext: () -> Unit,
     now: Long,
     sleepAt: Long?,
-    onOpenSleep: () -> Unit,
     appVolume: Int,
     volumeSync: Boolean,
     sysVol: Int,
@@ -316,6 +350,7 @@ private fun PlayerBar(
         shadowElevation = 12.dp,
     ) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+
             // ---------- 1줄: 음량 ----------
             val muted = if (volumeSync) sysVol == 0 else appVolume == 0
             val label = if (volumeSync) {
@@ -363,53 +398,60 @@ private fun PlayerBar(
                 Checkbox(checked = volumeSync, onCheckedChange = onToggleSync)
                 Text("시스템", style = MaterialTheme.typography.labelSmall)
             }
-            // ---------- 2줄: 채널 정보 + 재생 버튼 ----------
+
+            // ---------- 2줄: 로고 + 채널 정보 3줄 + 재생 버튼 ----------
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 14.dp),
+                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 ChannelLogo(ch?.logo, ch?.name ?: "K", Modifier.size(56.dp))
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
+
+                // 채널명 + 재생 상태 / 방송 정보
+                Column(
+                    Modifier.weight(1f).heightIn(min = 56.dp),
+                    verticalArrangement = Arrangement.Center
+                ) {
                     val stateLabel = when {
                         ch == null -> "대기 중"
                         isOn -> "● 재생 중"
                         else -> "정지됨"
                     }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            ch?.name ?: "채널을 선택하세요",
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            listOfNotNull(stateLabel, sleepAt?.let { sleepRemainLabel(it, now) })
+                                .joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isOn) MaterialTheme.colorScheme.primary else onContainer.copy(alpha = 0.7f),
+                            maxLines = 1
+                        )
+                    }
+                    val sub = status.ifEmpty { program?.label() ?: "" }
                     Text(
-                        listOfNotNull(stateLabel, sleepAt?.let { sleepRemainLabel(it, now) })
-                            .joinToString("  ·  "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isOn) MaterialTheme.colorScheme.primary else onContainer.copy(alpha = 0.7f)
-                    )
-                    Text(
-                        ch?.name ?: "채널을 선택하세요",
-                        style = MaterialTheme.typography.titleMedium,
+                        sub.ifEmpty { " " },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = onContainer.copy(alpha = 0.8f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val sub = status.ifEmpty { program?.label() ?: "" }
-                    if (sub.isNotEmpty()) {
-                        Text(
-                            sub,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = onContainer.copy(alpha = 0.8f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
                 }
-                IconButton(onClick = onOpenSleep, enabled = enabled && isOn) {
-                    Icon(
-                        IconSleep,
-                        contentDescription = "꺼짐 예약",
-                        tint = if (sleepAt != null) MaterialTheme.colorScheme.primary else LocalContentColor.current
-                    )
-                }
-                IconButton(onClick = onPrev, enabled = enabled && ch != null) {
-                    Icon(IconPrev, contentDescription = "이전 채널")
+
+                IconButton(
+                    onClick = onPrev,
+                    enabled = enabled && ch != null,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(IconPrev, contentDescription = "이전 채널", modifier = Modifier.size(30.dp))
                 }
                 FilledIconButton(
                     onClick = onPlayStop,
@@ -423,11 +465,15 @@ private fun PlayerBar(
                     Icon(
                         if (isOn) IconStop else IconPlay,
                         contentDescription = if (isOn) "정지" else "재생",
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(30.dp)
                     )
                 }
-                IconButton(onClick = onNext, enabled = enabled && ch != null) {
-                    Icon(IconNext, contentDescription = "다음 채널")
+                IconButton(
+                    onClick = onNext,
+                    enabled = enabled && ch != null,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(IconNext, contentDescription = "다음 채널", modifier = Modifier.size(30.dp))
                 }
             }
         }
@@ -571,7 +617,7 @@ private fun sleepRemainLabel(at: Long, now: Long): String {
     return when {
         min < 1 -> "곧 꺼짐"
         min < 60 -> "${min}분 후 꺼짐"
-        else -> "${min / 60}시간 ${min % 60}분 후 꺼짐"
+        else -> "%d:%02d 후 꺼짐".format(min / 60, min % 60)
     }
 }
 
@@ -586,4 +632,8 @@ private val IconVolume = svgIcon(
 private val IconVolumeOff = svgIcon(
     "volume_off",
     "M16.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v2.21l2.45,2.45c0.03,-0.2 0.05,-0.41 0.05,-0.63zM19,12c0,0.94 -0.2,1.82 -0.54,2.64l1.51,1.51C20.63,14.91 21,13.5 21,12c0,-4.28 -2.99,-7.86 -7,-8.77v2.06c2.89,0.86 5,3.54 5,6.71zM4.27,3L3,4.27 7.73,9H3v6h4l5,5v-6.73l4.25,4.25c-0.67,0.52 -1.42,0.93 -2.25,1.18v2.06c1.38,-0.31 2.63,-0.95 3.69,-1.81L19.73,21 21,19.73l-9,-9L4.27,3zM12,4L9.91,6.09 12,8.18V4z"
+)
+private val IconAlarm = svgIcon(
+    "alarm",
+    "M22,5.72l-4.6,-3.86 -1.29,1.53 4.6,3.86L22,5.72zM7.88,3.39L6.6,1.86 2,5.71l1.29,1.53 4.59,-3.85zM12.5,8H11v6l4.75,2.85 0.75,-1.23 -4,-2.37V8zM12,4c-4.97,0 -9,4.03 -9,9s4.02,9 9,9c4.97,0 9,-4.03 9,-9s-4.03,-9 -9,-9zM12,20c-3.87,0 -7,-3.13 -7,-7s3.13,-7 7,-7 7,3.13 7,7 -3.13,7 -7,7z"
 )
