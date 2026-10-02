@@ -63,6 +63,7 @@ import androidx.media3.session.SessionToken
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import android.widget.RemoteViews
@@ -84,6 +85,8 @@ object WidgetState {
         val logo: String? = null,
         val vol: Int = -1,          // 시스템 미디어 음량 (-1 = 모름)
         val volMax: Int = 15,
+        val car: Boolean = false,   // 안드로이드 오토 연결 중 → 음량 줄은 앱 음량
+        val appVol: Int = 100,      // 앱 음량 (0~300%)
     )
 
     fun toJson(d: Data): String = JSONObject()
@@ -94,6 +97,8 @@ object WidgetState {
         .put("logo", d.logo ?: "")
         .put("vol", d.vol)
         .put("volMax", d.volMax)
+        .put("car", d.car)
+        .put("appVol", d.appVol)
         .toString()
 
     fun fromJson(s: String?): Data? = runCatching {
@@ -106,6 +111,8 @@ object WidgetState {
             logo = o.optString("logo").ifEmpty { null },
             vol = o.optInt("vol", -1),
             volMax = o.optInt("volMax", 15),
+            car = o.optBoolean("car", false),
+            appVol = o.optInt("appVol", 100),
         )
     }.getOrNull()
 
@@ -170,6 +177,7 @@ class WidgetActionReceiver : BroadcastReceiver() {
         const val ACTION_PLAY_CHANNEL = "kr.ohnggni.kradio.widget.PLAY_CHANNEL"
         const val ACTION_VOL_UP = "kr.ohnggni.kradio.widget.VOL_UP"
         const val ACTION_VOL_DOWN = "kr.ohnggni.kradio.widget.VOL_DOWN"
+        const val APP_STEP = 20   // 오토 연결 중 위젯 버튼 한 번 = 앱 음량 20%
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -189,7 +197,20 @@ class WidgetActionReceiver : BroadcastReceiver() {
             CoroutineScope(Dispatchers.Main).launch { runCatching { WidgetUpdater.push(app) } }
         }
         when (val action = intent.action) {
-            ACTION_VOL_UP, ACTION_VOL_DOWN -> {
+            ACTION_VOL_UP, ACTION_VOL_DOWN -> CoroutineScope(Dispatchers.Main).launch {
+                // 오토 연결 중: 폰 음량은 차 소리와 무관 → 앱 음량을 20%씩 조절
+                val inCar = withContext(Dispatchers.IO) { CarLink.query(app) }
+                if (inCar) {
+                    val cur = AppVolume.get(app)
+                    val next = if (action == ACTION_VOL_UP) (cur / APP_STEP + 1) * APP_STEP
+                               else ((cur + APP_STEP - 1) / APP_STEP - 1) * APP_STEP
+                    val v = next.coerceIn(AppVolume.MIN, AppVolume.MAX)
+                    AppVolume.set(app, v)   // 재생 서비스가 바로 적용
+                    WidgetState.save(app, WidgetState.read(app).copy(car = true, appVol = v))
+                    runCatching { WidgetUpdater.push(app) }
+                    pending.finish()
+                    return@launch
+                }
                 val am = app.getSystemService(AudioManager::class.java)
                 val before = am.getStreamVolume(AudioManager.STREAM_MUSIC)
                 // 한 단계 조절은 시스템에 맡김 (빠르게 여러 번 눌러도 순서대로 처리돼서 안 꼬임)
@@ -200,23 +221,22 @@ class WidgetActionReceiver : BroadcastReceiver() {
                         0
                     )
                 }
-                CoroutineScope(Dispatchers.Main).launch {
-                    // 반영된 실제 값을 읽어서 한 번만 그림 (아직 반영 전이면 잠깐 기다림)
-                    var now = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-                    if (now == before) {
-                        delay(150)
-                        now = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-                    }
-                    WidgetState.save(
-                        app,
-                        WidgetState.read(app).copy(
-                            vol = now,
-                            volMax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                        )
-                    )
-                    runCatching { WidgetUpdater.push(app) }
-                    pending.finish()
+                // 반영된 실제 값을 읽어서 한 번만 그림 (아직 반영 전이면 잠깐 기다림)
+                var now = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                if (now == before) {
+                    delay(150)
+                    now = am.getStreamVolume(AudioManager.STREAM_MUSIC)
                 }
+                WidgetState.save(
+                    app,
+                    WidgetState.read(app).copy(
+                        vol = now,
+                        volMax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+                        car = false
+                    )
+                )
+                runCatching { WidgetUpdater.push(app) }
+                pending.finish()
             }
 
             else -> withController(app) { ctl ->
@@ -331,7 +351,7 @@ class KRadioWidget : GlanceAppWidget() {
         val size = LocalSize.current
         val isLarge = size.height >= large.height
         val isWide = isLarge && size.width >= wideLarge.width
-        val showVol = isLarge && st.vol >= 0
+        val showVol = isLarge && (st.car || st.vol >= 0)
 
         Column(
             GlanceModifier
@@ -484,8 +504,10 @@ class KRadioWidget : GlanceAppWidget() {
     @Composable
     private fun RowScope.VolumeControls(c: Context, st: WidgetState.Data) {
         val colors = GlanceTheme.colors
-        val steps = st.volMax.coerceIn(5, 30)
-        val filled = st.vol.coerceIn(0, steps)
+        // 오토 연결 중: 앱 음량 0~300%를 20%씩 15칸 (5칸 = 100%) / 평소: 폰 음량 단계
+        val steps = if (st.car) AppVolume.MAX / WidgetActionReceiver.APP_STEP else st.volMax.coerceIn(5, 30)
+        val filled = if (st.car) (st.appVol + WidgetActionReceiver.APP_STEP / 2) / WidgetActionReceiver.APP_STEP
+                     else st.vol.coerceIn(0, steps)
 
         RoundButton(R.drawable.ic_w_minus, "음량 줄이기", broadcast(c, WidgetActionReceiver.ACTION_VOL_DOWN), 42.dp, filled = false)
         Spacer(GlanceModifier.width(10.dp))
@@ -512,6 +534,15 @@ class KRadioWidget : GlanceAppWidget() {
             }
         }
 
+        if (st.car) {
+            // 오토 연결 중임을 알리는 앱 음량 숫자
+            Spacer(GlanceModifier.width(6.dp))
+            Text(
+                "${st.appVol}%",
+                maxLines = 1,
+                style = TextStyle(color = colors.onPrimaryContainer, fontSize = 12.sp)
+            )
+        }
         Spacer(GlanceModifier.width(10.dp))
         RoundButton(R.drawable.ic_w_plus, "음량 키우기", broadcast(c, WidgetActionReceiver.ACTION_VOL_UP), 42.dp, filled = false)
     }

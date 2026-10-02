@@ -1,6 +1,7 @@
 package kr.ohnggni.kradio
 
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.ConnectivityManager
@@ -93,7 +94,10 @@ class PlaybackService : MediaLibraryService() {
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ChannelPrefs.KEY || key == SourceSettings.KEY_CONFIG) scope.launch { refreshPlaylist() }
         if (key == SleepTimer.KEY) scheduleSleep()
-        if (key == AppVolume.KEY) applyVolume()
+        if (key == AppVolume.KEY) {
+            applyVolume()
+            updateWidget()   // 위젯 음량 게이지(오토 연결 중엔 앱 음량)
+        }
         if (key == ScheduledStart.KEY) onScheduledStartRequested()
     }
 
@@ -130,6 +134,10 @@ class PlaybackService : MediaLibraryService() {
 
     private var lastWidget: WidgetState.Data? = null
     private var silenceJob: Job? = null
+
+    // 안드로이드 오토 연결 여부 (위젯 음량 표시·무음 감시에 사용)
+    @Volatile private var carConnected = false
+    private var carReceiver: BroadcastReceiver? = null
     // 폰 볼륨 버튼으로 음량이 바뀌면 위젯 음량 막대도 갱신
     private val volumeObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) = updateWidget()
@@ -324,6 +332,7 @@ class PlaybackService : MediaLibraryService() {
         runCatching { connectivity.registerDefaultNetworkCallback(networkCallback) }
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
             .registerOnSharedPreferenceChangeListener(prefsListener)
+        carReceiver = CarLink.watch(this, scope) { setCarConnected(it) }
 
         // 매분 정각마다 현재 방송 정보 갱신
         nowPlayingJob = scope.launch {
@@ -382,17 +391,19 @@ class PlaybackService : MediaLibraryService() {
     }
     // ---------------- 무음 재생 감지 ----------------
 
-    /** 안드로이드 오토 연결 중인지 (오토 앱이 제공하는 연결 상태: 0 미연결, 1 차량 내장, 2 폰 연결) */
-    private suspend fun isCarConnected(): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            contentResolver.query(
-                Uri.parse("content://androidx.car.app.connection"),
-                arrayOf("CarConnectionState"), null, null, null
-            )?.use { c ->
-                val i = c.getColumnIndex("CarConnectionState")
-                i >= 0 && c.moveToNext() && c.getInt(i) != 0
-            } ?: false
-        }.getOrDefault(false)
+    /** 오토 연결 상태가 바뀌면 기록하고 위젯 음량 표시를 바꿈 */
+    private fun setCarConnected(on: Boolean) {
+        if (on == carConnected) return
+        carConnected = on
+        Log.i("KRadio", "안드로이드 오토 ${if (on) "연결" else "해제"}")
+        updateWidget()
+    }
+
+    /** 무음 감시용: 신호를 놓쳤을 수도 있으니 직접 다시 조회 */
+    private suspend fun isCarConnected(): Boolean {
+        val on = withContext(Dispatchers.IO) { CarLink.query(this@PlaybackService) }
+        setCarConnected(on)
+        return on
     }
 
     /** 소리가 꺼진 채로 1분 재생되면 배터리 절약을 위해 정지 */
@@ -450,6 +461,8 @@ class PlaybackService : MediaLibraryService() {
             logo = ch?.logo,
             vol = am.getStreamVolume(AudioManager.STREAM_MUSIC),
             volMax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+            car = carConnected,
+            appVol = AppVolume.get(this),
         )
         // 위젯에 저장된 값과 같을 때만 건너뜀 (위젯 버튼이 미리 바꾼 모양이 실제와 다르면 바로잡음)
         if (data == WidgetState.read(this)) {
@@ -1080,6 +1093,8 @@ class PlaybackService : MediaLibraryService() {
         loudness?.release()
         loudness = null
         contentResolver.unregisterContentObserver(volumeObserver)
+        carReceiver?.let { runCatching { unregisterReceiver(it) } }
+        carReceiver = null
         scope.cancel()
         mediaSession?.run {
             player.release()

@@ -102,6 +102,7 @@ fun MainScreen(
     onSysVolume: (Int) -> Unit,
     onToggleSync: (Boolean) -> Unit,
     onToggleMute: () -> Unit,
+    carMode: Boolean,
     hasSchedules: Boolean,
     onOpenSchedules: () -> Unit,
 ) {
@@ -143,6 +144,7 @@ fun MainScreen(
                 onSysVolume = onSysVolume,
                 onToggleSync = onToggleSync,
                 onToggleMute = onToggleMute,
+                carMode = carMode,
             )
         }
     ) { inner ->
@@ -341,6 +343,7 @@ private fun PlayerBar(
     onSysVolume: (Int) -> Unit,
     onToggleSync: (Boolean) -> Unit,
     onToggleMute: () -> Unit,
+    carMode: Boolean,   // 안드로이드 오토 연결 중: 폰 음량은 차 소리와 무관 → 앱 음량만
 ) {
     val container = MaterialTheme.colorScheme.primaryContainer
     val onContainer = MaterialTheme.colorScheme.onPrimaryContainer
@@ -352,8 +355,9 @@ private fun PlayerBar(
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
 
             // ---------- 1줄: 음량 ----------
-            val muted = if (volumeSync) sysVol == 0 else appVolume == 0
-            val label = if (volumeSync) {
+            val sysMode = volumeSync && !carMode
+            val muted = if (sysMode) sysVol == 0 else appVolume == 0
+            val label = if (sysMode) {
                 "${if (sysMax > 0) sysVol * 100 / sysMax else 0}%"
             } else "${appVolume}%"
 
@@ -373,7 +377,7 @@ private fun PlayerBar(
                     )
                 }
                 Spacer(Modifier.width(4.dp))
-                if (volumeSync) {
+                if (sysMode) {
                     VolumeSlider(
                         value = sysVol.toFloat(),
                         onValueChange = { onSysVolume(it.roundToInt()) },
@@ -395,8 +399,18 @@ private fun PlayerBar(
                     textAlign = TextAlign.End,
                     modifier = Modifier.width(44.dp)
                 )
-                Checkbox(checked = volumeSync, onCheckedChange = onToggleSync)
-                Text("시스템", style = MaterialTheme.typography.labelSmall)
+                if (carMode) {
+                    // 오토 연결 중: 음량은 차량에서, 여기선 앱 음량(증폭)만
+                    Text(
+                        "차량",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+                } else {
+                    Checkbox(checked = volumeSync, onCheckedChange = onToggleSync)
+                    Text("시스템", style = MaterialTheme.typography.labelSmall)
+                }
             }
 
             // ---------- 2줄: 로고 + 채널 정보 3줄 + 재생 버튼 ----------
