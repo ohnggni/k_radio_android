@@ -16,6 +16,8 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.FlagSet
+import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -23,7 +25,11 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.LibraryParams
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
@@ -35,6 +41,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import android.media.audiofx.LoudnessEnhancer
@@ -58,10 +65,15 @@ private const val MAX_RETRY_DELAY_MS = 30_000L       // 재연결 최대 대기 
 
 private const val BASE_REFRESH_MS = 30 * 60 * 1000L    // 채널 설정 30분마다 새로 확인
 
-@OptIn(UnstableApi::class)
-class PlaybackService : MediaSessionService() {
+// 안드로이드 오토 목록 ID (채널 ID와 겹치지 않게 '@'로 시작)
+private const val ROOT_ID = "@root"
+private const val FAV_ID = "@fav"
+private const val ALL_ID = "@all"
 
-    private var mediaSession: MediaSession? = null
+@OptIn(UnstableApi::class)
+class PlaybackService : MediaLibraryService() {
+
+    private var mediaSession: MediaLibrarySession? = null
     private var exoPlayer: ExoPlayer? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -130,16 +142,8 @@ class PlaybackService : MediaSessionService() {
         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
         .build()
 
-    // 내장 로고 이미지 데이터 (워치 등 외부 기기는 앱 내부 파일을 못 읽어서 데이터로 전달)
-    private val logoBytesCache = ConcurrentHashMap<String, ByteArray>()
-
-    private fun logoBytes(ch: Channel): ByteArray? {
-        val logo = ch.logo ?: return null
-        if (!logo.startsWith(LogoCache.ASSET_PREFIX)) return null
-        return logoBytesCache[logo] ?: runCatching {
-            assets.open(logo.removePrefix(LogoCache.ASSET_PREFIX)).use { it.readBytes() }
-        }.getOrNull()?.also { logoBytesCache[logo] = it }
-    }
+    // 로고는 이미지 데이터 대신 주소(content://)로 전달 → 오토가 같은 그림을 매번 다시 그리지 않음
+    private fun logoUri(ch: Channel): Uri? = LogoProvider.uriFor(this, ch.logo)
 
     // 네트워크 복구 감지
     private val connectivity by lazy { getSystemService(ConnectivityManager::class.java) }
@@ -289,6 +293,19 @@ class PlaybackService : MediaSessionService() {
                 exo.seekToPreviousMediaItem()
                 if (exo.playbackState == Player.STATE_IDLE) exo.prepare()
             }
+
+            // 세션·외부 기기에 알리는 리스너는 TimelineFilter로 감싸서 등록 (오토 화면 깜빡임 방지)
+            private val filters = ConcurrentHashMap<Player.Listener, Player.Listener>()
+
+            override fun addListener(listener: Player.Listener) {
+                val f = TimelineFilter(listener)
+                filters[listener] = f
+                super.addListener(f)
+            }
+
+            override fun removeListener(listener: Player.Listener) {
+                super.removeListener(filters.remove(listener) ?: listener)
+            }
         }
 
         // 알림/외부 기기에서 세션을 누르면 앱 화면 열기
@@ -298,8 +315,9 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        mediaSession = MediaSession.Builder(this, player)
-            .setCallback(SessionCallback())
+        mediaSession = MediaLibrarySession.Builder(this, player, SessionCallback())
+            // 라이브 라디오는 재생 위치가 의미 없음 → 3초마다 위치 알림 끔 (오토 큐 화면이 맨 위로 튀는 문제)
+            .setPeriodicPositionUpdateEnabled(false)
             .setSessionActivity(openApp)
             .build()
 
@@ -364,7 +382,20 @@ class PlaybackService : MediaSessionService() {
     }
     // ---------------- 무음 재생 감지 ----------------
 
-    /** 소리가 꺼진 채로 3분 재생되면 배터리 절약을 위해 정지 */
+    /** 안드로이드 오토 연결 중인지 (오토 앱이 제공하는 연결 상태: 0 미연결, 1 차량 내장, 2 폰 연결) */
+    private suspend fun isCarConnected(): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            contentResolver.query(
+                Uri.parse("content://androidx.car.app.connection"),
+                arrayOf("CarConnectionState"), null, null, null
+            )?.use { c ->
+                val i = c.getColumnIndex("CarConnectionState")
+                i >= 0 && c.moveToNext() && c.getInt(i) != 0
+            } ?: false
+        }.getOrDefault(false)
+    }
+
+    /** 소리가 꺼진 채로 1분 재생되면 배터리 절약을 위해 정지 */
     private fun watchSilence() {
         silenceJob?.cancel()
         silenceJob = scope.launch {
@@ -378,7 +409,8 @@ class PlaybackService : MediaSessionService() {
                 }
                 val am = getSystemService(AudioManager::class.java)
                 // 차량(안드로이드 오토 등)이 음량을 관리할 때는 폰 음량 값을 믿을 수 없어서 무시
-                val sysMuted = !am.isVolumeFixed &&
+                // (오토 연결 중엔 폰 스피커 음량이 0이어도 차에서는 소리가 남)
+                val sysMuted = !isCarConnected() && !am.isVolumeFixed &&
                         (am.getStreamVolume(AudioManager.STREAM_MUSIC) == 0 || am.isStreamMute(AudioManager.STREAM_MUSIC))
                 val muted = AppVolume.get(this@PlaybackService) == 0 || sysMuted
                 if (!muted) {
@@ -386,14 +418,14 @@ class PlaybackService : MediaSessionService() {
                     continue
                 }
                 if (mutedSince == 0L) mutedSince = System.currentTimeMillis()
-                if (System.currentTimeMillis() - mutedSince >= 3 * 60_000L) {
-                    Log.i("KRadio", "무음 재생 3분 → 자동 정지")
+                if (System.currentTimeMillis() - mutedSince >= 60_000L) {
+                    Log.i("KRadio", "무음 재생 1분 → 자동 정지")
                     exo.pause()
                     exo.stop()
                     ScheduleNotifier.show(
                         this@PlaybackService, 2004,
                         "케이라디오를 정지했어요",
-                        "소리가 꺼진 채로 3분 동안 재생되어 배터리 절약을 위해 정지했어요.",
+                        "소리가 꺼진 채로 1분 동안 재생되어 배터리 절약을 위해 정지했어요.",
                         channel = "general",
                         channelName = "재생 안내"
                     )
@@ -609,7 +641,6 @@ class PlaybackService : MediaSessionService() {
             val exo = exoPlayer ?: return
             val count = exo.mediaItemCount
             if (count == 0) return
-            val currentIdx = exo.currentMediaItemIndex
 
             val epg = EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true)
             val byId = allChannels.associateBy { it.id }
@@ -622,12 +653,11 @@ class PlaybackService : MediaSessionService() {
                 val artist = program?.let {
                     if (it.subTitle.isNullOrBlank()) it.title else "${it.title} · ${it.subTitle}"
                 } ?: ch.group
-                val wantArt = if (i == currentIdx) logoBytes(ch) else null
+                val wantArt = logoUri(ch)
 
                 val cur = item.mediaMetadata
-                val artSame = (cur.artworkData == null && wantArt == null) ||
-                        (cur.artworkData != null && wantArt != null && cur.artworkData.contentEquals(wantArt))
-                if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist && artSame) {
+                if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist &&
+                    cur.artworkUri == wantArt && cur.artworkData == null) {
                     item
                 } else {
                     changed = true
@@ -636,7 +666,8 @@ class PlaybackService : MediaSessionService() {
                             cur.buildUpon()
                                 .setTitle(ch.name)
                                 .setArtist(artist)
-                                .setArtworkData(wantArt, if (wantArt != null) MediaMetadata.PICTURE_TYPE_FRONT_COVER else null)
+                                .setArtworkUri(wantArt)
+                                .setArtworkData(null, null)
                                 .build()
                         )
                         .build()
@@ -728,8 +759,8 @@ class PlaybackService : MediaSessionService() {
                 MediaMetadata.Builder()
                     .setTitle(ch.name)
                     .setArtist(ch.group)
-                    // 내장 로고(asset://)는 오토·워치가 못 열어서 넘기지 않음 (이미지 데이터로 따로 전달)
-                    .setArtworkUri(ch.logo?.takeIf { it.startsWith("http") }?.let { Uri.parse(it) })
+                    // 내장 로고는 LogoProvider 주소(content://), 인터넷 로고는 그 주소 그대로
+                    .setArtworkUri(logoUri(ch))
                     .build()
             )
         if (ch.type == "api" || ch.url?.contains(".m3u8") == true) {
@@ -738,19 +769,17 @@ class PlaybackService : MediaSessionService() {
         return builder.build()
     }
 
-    /** 재생 항목에 방송 정보(프로그램명)와 로고(재생 시작 채널만)를 채움 */
-    private fun decoratedItem(ch: Channel, epg: EpgData?, withArt: Boolean): MediaItem {
+    /** 재생 항목에 방송 정보(프로그램명)를 채움 (로고 주소는 placeholderItem에서) */
+    private fun decoratedItem(ch: Channel, epg: EpgData?): MediaItem {
         val item = placeholderItem(ch)
         val program = epg?.display(ch.epg)
         val artist = program?.let {
             if (it.subTitle.isNullOrBlank()) it.title else "${it.title} · ${it.subTitle}"
         } ?: ch.group
-        val art = if (withArt) logoBytes(ch) else null
         return item.buildUpon()
             .setMediaMetadata(
                 item.mediaMetadata.buildUpon()
                     .setArtist(artist)
-                    .setArtworkData(art, if (art != null) MediaMetadata.PICTURE_TYPE_FRONT_COVER else null)
                     .build()
             )
             .build()
@@ -761,7 +790,7 @@ class PlaybackService : MediaSessionService() {
         val epg = runCatching {
             EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true, offline = true)
         }.getOrNull()
-        return list.mapIndexed { i, ch -> decoratedItem(ch, epg, i == startIdx) }
+        return list.map { ch -> decoratedItem(ch, epg) }
     }
 
     /** 플레이어가 주소를 열기 직전에 호출됨 (백그라운드 스레드) */
@@ -796,7 +825,99 @@ class PlaybackService : MediaSessionService() {
 
     // ---------------- 세션 콜백 ----------------
 
-    private inner class SessionCallback : MediaSession.Callback {
+    // ---------------- 안드로이드 오토 목록 (탭: 즐겨찾기 / 전체 채널) ----------------
+
+    private fun folderItem(id: String, title: String): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS)
+                    .build()
+            )
+            .build()
+
+    /** 오토 목록용 채널 항목 */
+    private fun browseItem(ch: Channel): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(ch.id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(ch.name)
+                    .setArtist(ch.group)
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .setArtworkUri(logoUri(ch))
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                    .build()
+            )
+            .build()
+
+    private inner class SessionCallback : MediaLibrarySession.Callback {
+
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: LibraryParams?
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            Log.i("KRadio", "오토 목록 요청(루트): ${browser.packageName}")
+            return Futures.immediateFuture(
+                LibraryResult.ofItem(folderItem(ROOT_ID, "케이라디오"), params)
+            )
+        }
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
+            scope.launch {
+                try {
+                    val items: List<MediaItem> = when (parentId) {
+                        ROOT_ID -> listOf(
+                            folderItem(FAV_ID, "즐겨찾기"),
+                            folderItem(ALL_ID, "전체 채널")
+                        )
+                        FAV_ID -> {
+                            val list = getChannels()
+                            val fav = ChannelPrefs.read(this@PlaybackService).favorites
+                            fav.mapNotNull { id -> list.firstOrNull { it.id == id } }.map { browseItem(it) }
+                        }
+                        ALL_ID -> getChannels().map { browseItem(it) }
+                        else -> emptyList()
+                    }
+                    Log.i("KRadio", "오토 목록: $parentId → ${items.size}개")
+                    future.set(LibraryResult.ofItemList(ImmutableList.copyOf(items), params))
+                } catch (e: Exception) {
+                    Log.e("KRadio", "오토 목록 실패: $parentId", e)
+                    future.set(LibraryResult.ofError(LibraryResult.RESULT_ERROR_IO))
+                }
+            }
+            return future
+        }
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val future = SettableFuture.create<LibraryResult<MediaItem>>()
+            scope.launch {
+                val ch = runCatching { getChannels() }.getOrNull()?.firstOrNull { it.id == mediaId }
+                future.set(
+                    if (ch != null) LibraryResult.ofItem(browseItem(ch), null)
+                    else LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+                )
+            }
+            return future
+        }
 
         // 워치 플러그인 등 외부 컨트롤러에도 전체 조작 권한 부여
         // (Media3 최신 버전은 신뢰되지 않은 컨트롤러를 읽기 전용으로 제한함)
@@ -942,7 +1063,7 @@ class PlaybackService : MediaSessionService() {
         return super.onStartCommand(intent, flags, startId)
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
         mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -968,4 +1089,93 @@ class PlaybackService : MediaSessionService() {
         exoPlayer = null
         super.onDestroy()
     }
+}
+
+/**
+ * 라이브 HLS는 몇 초마다 재생목록을 새로 받으면서 타임라인이 바뀌는데(라이브 구간 위치만 바뀜),
+ * 이걸 그대로 알리면 세션이 안드로이드 오토에 큐를 매번 다시 보내 재생 화면 배경이 깜빡인다.
+ * 채널 구성(채널 ID·라이브 여부 등)이 그대로인 SOURCE_UPDATE는 알리지 않고 걸러낸다.
+ * 채널 추가·순서 변경·방송 정보 갱신은 PLAYLIST_CHANGED라 그대로 전달된다.
+ *
+ * 주의: 코틀린의 `by` 위임은 자바 인터페이스의 default 메서드를 위임하지 않는다.
+ * Player.Listener는 전부 default 메서드라서, 모든 콜백을 하나씩 직접 전달해야 한다.
+ * (Media3 버전을 올려 Listener에 메서드가 추가되면 여기에도 추가할 것)
+ */
+@OptIn(UnstableApi::class)
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+private class TimelineFilter(private val inner: Player.Listener) : Player.Listener {
+
+    private var lastKey: List<String>? = null
+    private var suppressed = false
+    private val window = Timeline.Window()
+
+    private fun keyOf(t: Timeline): List<String> = (0 until t.windowCount).map { i ->
+        t.getWindow(i, window)
+        "${window.mediaItem.mediaId}|${window.isLive()}|${window.isDynamic}|${window.isPlaceholder}|${window.isSeekable}"
+    }
+
+    override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+        val key = keyOf(timeline)
+        suppressed = reason == Player.TIMELINE_CHANGE_REASON_SOURCE_UPDATE && key == lastKey
+        if (suppressed) return
+        lastKey = key
+        inner.onTimelineChanged(timeline, reason)
+    }
+
+    override fun onEvents(player: Player, events: Player.Events) {
+        if (suppressed && events.contains(Player.EVENT_TIMELINE_CHANGED)) {
+            suppressed = false
+            val flags = FlagSet.Builder()
+            for (i in 0 until events.size()) {
+                val e = events.get(i)
+                if (e != Player.EVENT_TIMELINE_CHANGED) flags.add(e)
+            }
+            val rest = flags.build()
+            if (rest.size() > 0) inner.onEvents(player, Player.Events(rest))
+            return
+        }
+        inner.onEvents(player, events)
+    }
+
+    // ---- 나머지 콜백은 그대로 전달 ----
+    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = inner.onMediaItemTransition(mediaItem, reason)
+    override fun onTracksChanged(tracks: androidx.media3.common.Tracks) = inner.onTracksChanged(tracks)
+    override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) = inner.onMediaMetadataChanged(mediaMetadata)
+    override fun onPlaylistMetadataChanged(mediaMetadata: MediaMetadata) = inner.onPlaylistMetadataChanged(mediaMetadata)
+    override fun onIsLoadingChanged(isLoading: Boolean) = inner.onIsLoadingChanged(isLoading)
+    override fun onLoadingChanged(isLoading: Boolean) = inner.onLoadingChanged(isLoading)
+    override fun onAvailableCommandsChanged(availableCommands: Player.Commands) = inner.onAvailableCommandsChanged(availableCommands)
+    override fun onTrackSelectionParametersChanged(parameters: androidx.media3.common.TrackSelectionParameters) = inner.onTrackSelectionParametersChanged(parameters)
+    override fun onPlayerStateChanged(playWhenReady: Boolean, playbackState: Int) = inner.onPlayerStateChanged(playWhenReady, playbackState)
+    override fun onPlaybackStateChanged(playbackState: Int) = inner.onPlaybackStateChanged(playbackState)
+    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = inner.onPlayWhenReadyChanged(playWhenReady, reason)
+    override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) = inner.onPlaybackSuppressionReasonChanged(playbackSuppressionReason)
+    override fun onIsPlayingChanged(isPlaying: Boolean) = inner.onIsPlayingChanged(isPlaying)
+    override fun onRepeatModeChanged(repeatMode: Int) = inner.onRepeatModeChanged(repeatMode)
+    override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = inner.onShuffleModeEnabledChanged(shuffleModeEnabled)
+    override fun onPlayerError(error: PlaybackException) = inner.onPlayerError(error)
+    override fun onPlayerErrorChanged(error: PlaybackException?) = inner.onPlayerErrorChanged(error)
+    override fun onPositionDiscontinuity(reason: Int) = inner.onPositionDiscontinuity(reason)
+    override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) =
+        inner.onPositionDiscontinuity(oldPosition, newPosition, reason)
+    override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) = inner.onPlaybackParametersChanged(playbackParameters)
+    override fun onSeekBackIncrementChanged(seekBackIncrementMs: Long) = inner.onSeekBackIncrementChanged(seekBackIncrementMs)
+    override fun onSeekForwardIncrementChanged(seekForwardIncrementMs: Long) = inner.onSeekForwardIncrementChanged(seekForwardIncrementMs)
+    override fun onMaxSeekToPreviousPositionChanged(maxSeekToPreviousPositionMs: Long) = inner.onMaxSeekToPreviousPositionChanged(maxSeekToPreviousPositionMs)
+    override fun onAudioSessionIdChanged(audioSessionId: Int) = inner.onAudioSessionIdChanged(audioSessionId)
+    override fun onAudioAttributesChanged(audioAttributes: AudioAttributes) = inner.onAudioAttributesChanged(audioAttributes)
+    override fun onVolumeChanged(volume: Float) = inner.onVolumeChanged(volume)
+    override fun onSkipSilenceEnabledChanged(skipSilenceEnabled: Boolean) = inner.onSkipSilenceEnabledChanged(skipSilenceEnabled)
+    override fun onDeviceInfoChanged(deviceInfo: androidx.media3.common.DeviceInfo) = inner.onDeviceInfoChanged(deviceInfo)
+    override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) = inner.onDeviceVolumeChanged(volume, muted)
+    override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) = inner.onVideoSizeChanged(videoSize)
+    override fun onSurfaceSizeChanged(width: Int, height: Int) = inner.onSurfaceSizeChanged(width, height)
+    override fun onRenderedFirstFrame() = inner.onRenderedFirstFrame()
+    override fun onCues(cues: MutableList<androidx.media3.common.text.Cue>) = inner.onCues(cues)
+    override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) = inner.onCues(cueGroup)
+    override fun onMetadata(metadata: androidx.media3.common.Metadata) = inner.onMetadata(metadata)
+
+    // 리스너 제거 시 같은 원본을 감싼 필터끼리 같은 것으로 취급
+    override fun equals(other: Any?): Boolean = other is TimelineFilter && other.inner == inner
+    override fun hashCode(): Int = inner.hashCode()
 }

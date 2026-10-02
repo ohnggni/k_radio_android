@@ -12,6 +12,10 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 안드로이드 오토 연결 상태 조회 (무음 감시에서 사용) -->
+    <queries>
+        <provider android:authorities="androidx.car.app.connection" />
+    </queries>
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -22,6 +26,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.KRadio"
         android:usesCleartextTraffic="true">
+        <!-- 안드로이드 오토: 미디어 앱으로 등록 -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -39,7 +47,9 @@
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
+                <action android:name="androidx.media3.session.MediaLibraryService" />
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
         <receiver
@@ -49,6 +59,11 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </receiver>
+        <!-- 내장 로고를 오토·워치·알림에 주소로 제공 (읽기 전용, 로고 파일만) -->
+        <provider
+            android:name=".LogoProvider"
+            android:authorities="${applicationId}.logos"
+            android:exported="true" />
         <receiver
             android:name=".ScheduleReceiver"
             android:exported="false">
