@@ -41,7 +41,7 @@ import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.glance.appwidget.updateAll
 
-private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE, SCHEDULE }
+private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE, SCHEDULE, NOTES }
 private const val CONFIG_RECHECK_MS = 15 * 60_000L  // 앱이 앞으로 나올 때 이만큼 지났으면 설정 다시 확인
 class MainActivity : ComponentActivity() {
 
@@ -251,6 +251,7 @@ class MainActivity : ComponentActivity() {
                         appVersion = appVersionName,
                         newVersion = newVersion,
                         onOpenUpdate = { openUpdate() },
+                        onOpenNotes = { screen = Screen.NOTES },
                         channels = channels,
                         startupMode = startupMode,
                         startupChannel = startupChannel,
@@ -288,6 +289,10 @@ class MainActivity : ComponentActivity() {
                         onResetAll = { resetAll() },
                     )
                     Screen.GUIDE -> GuideScreen(onBack = { screen = Screen.SETTINGS })
+                    Screen.NOTES -> ReleaseNotesScreen(
+                        appVersion = appVersionName,
+                        onBack = { screen = Screen.SETTINGS },
+                    )
                     Screen.SCHEDULE -> ScheduleScreen(
                         schedules = schedules,
                         channels = channels,

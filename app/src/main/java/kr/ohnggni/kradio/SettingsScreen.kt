@@ -30,6 +30,7 @@ fun SettingsScreen(
     appVersion: String,
     newVersion: String?,
     onOpenUpdate: () -> Unit,
+    onOpenNotes: () -> Unit,
     channels: List<Channel>,
     startupMode: String,
     startupChannel: String?,
@@ -125,6 +126,11 @@ fun SettingsScreen(
                 title = "버전",
                 value = newVersion?.let { "$appVersion · 새 버전 $it 있음" } ?: appVersion,
                 onClick = onOpenUpdate
+            )
+            SettingRow(
+                title = "변경 내역",
+                value = "버전별로 바뀐 점",
+                onClick = onOpenNotes
             )
             SettingRow(
                 title = "업데이트 받기",

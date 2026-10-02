@@ -4,25 +4,43 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.5.0 (2026-10-01)
+## 1.6.0 (Unreleased)
 
 ### New
-- **Home screen widget**: channel, program and logo; previous / play-stop / next.
-  - Larger sizes add device media volume buttons with a step gauge (one bar per volume step), up to 3 favorite channels (play directly without opening the app), and a date/clock.
-  - Play from the widget resumes the channel shown on the widget.
-  - Widget buttons may respond slightly slower than the app.
-- **Favorites** (star in channel management, up to 3): shown as app icon shortcuts (long press) and on the widget.
-- Auto-off and scheduled play buttons in the top banner.
-- Up/down buttons for all time inputs (hours by 1, minutes by 5; hold to repeat).
-- Playback stops automatically after 3 minutes of muted playback (app volume 0% or device media volume 0), with a notification.
+- **Android Auto support**: the app now appears as a media app in Android Auto.
+  - Three tabs with icons: Favorites (large logo grid), Channels (list) and Channels (tiles).
+  - Each channel shows its logo and the program currently on air.
+  - Now playing screen shows the channel logo and the current program with its time range (e.g. "Morning Show (07:00–09:00)"). The same title and time range appear in the Android Auto queue and on Bluetooth car displays; the phone notification and lock screen keep the program name only.
+  - Previous / next, play / stop and channel selection from Android Auto, the steering wheel buttons, the phone app and the widget all control the same playback.
+- **Volume while connected to Android Auto**: the car controls the output volume, so the device media volume no longer applies.
+  - Player bar: switches to the app volume slider (0–300%) with a "car" label while connected, even in system mode; the mute button uses the app volume. Returns to the previous mode automatically after disconnecting (the system mode setting itself is unchanged).
+  - Widget: the volume buttons adjust the app volume in 20% steps while connected, with a 15-step gauge (5 steps = 100%) and a percentage label.
+- App volume changed from the widget is reflected in the player bar immediately.
+- **Change history** (Settings → App info): release notes for every version in Korean, with the installed version marked.
 
 ### Improved
-- Player bar: channel name and playback state on one line, larger controls aligned with the logo.
-- Auto-off now starts fading at the set time (then stops 10 seconds later), to account for the delay of internet streams.
-- Scheduled play: next run shown next to the time input.
+- Muted-playback auto-stop now triggers after 1 minute instead of 3 minutes.
+- Muted-playback auto-stop ignores the device media volume while connected to Android Auto (the phone speaker volume may be 0 while sound plays through the car).
+- Channel logos are provided to external displays (Android Auto, notifications) through a read-only logo provider, and as image data for the channel currently playing (Galaxy Watch).
 
 ### Fixed
-- Channel logo missing on Android Auto and other external displays.
+- Android Auto now playing background flickering every few seconds while a live stream was playing.
+- Android Auto queue list jumping back to the top while scrolling during playback.
+- Muted-playback auto-stop stopping playback through Android Auto when the phone media volume was 0.
+
+### Notes
+- Android Auto shows apps installed outside the Play Store only when **Unknown sources** is enabled in Android Auto developer settings (Android Auto settings → tap the version 10 times → ⋮ → Developer settings).
+- To continue playing automatically when the phone connects to Android Auto, turn on Android Auto's **start media automatically** setting.
+- Grid and tile sizes in Android Auto are decided by the car display, not by the app.
+
+### Technical
+- Playback service changed from MediaSessionService to MediaLibraryService (browse tree for Android Auto; legacy MediaBrowserService compatible). Registered as an Android Auto media app (automotive_app_desc).
+- LogoProvider: bundled logos served as content://<package>.logos/<file>.png (read-only, logo files only, cached per app version).
+- CarLink: Android Auto connection state from the car connection provider plus its update broadcast (package visibility query declared).
+- Live HLS timeline updates that do not change the channel list (playlist refresh only) are no longer forwarded to the session, so the Auto queue is not re-sent every few seconds.
+- Periodic session position updates disabled (live radio has no meaningful position).
+- Car displays use displayTitle/subtitle; notification uses title/artist.
+- Connected controller version is logged for diagnostics.
 
 ---
 
@@ -30,8 +48,9 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ### New
 - **Home screen widget**: channel, program and logo; previous / play-stop / next.
-  - Larger sizes add device media volume buttons with a step gauge, up to 3 favorite channels (play directly without opening the app), and a date/clock.
+  - Larger sizes add device media volume buttons with a step gauge (one bar per volume step), up to 3 favorite channels (play directly without opening the app), and a date/clock.
   - Play from the widget resumes the channel shown on the widget.
+  - Widget buttons may respond slightly slower than the app.
 - **Favorites** (star in channel management, up to 3): shown as app icon shortcuts (long press) and on the widget.
 - Auto-off and scheduled play buttons in the top banner.
 - Up/down buttons for all time inputs (hours by 1, minutes by 5; hold to repeat).
