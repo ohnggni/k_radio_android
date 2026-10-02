@@ -2,6 +2,7 @@ package kr.ohnggni.kradio
 
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ContentResolver
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.ConnectivityManager
@@ -25,6 +26,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaSession
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -44,6 +46,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import android.media.audiofx.LoudnessEnhancer
 import kotlin.math.log2
@@ -54,6 +59,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.media.AudioManager
 import android.database.ContentObserver
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -70,6 +76,7 @@ private const val BASE_REFRESH_MS = 30 * 60 * 1000L    // 채널 설정 30분마
 private const val ROOT_ID = "@root"
 private const val FAV_ID = "@fav"
 private const val ALL_ID = "@all"
+private const val ALL_GRID_ID = "@allgrid"
 
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaLibraryService() {
@@ -150,8 +157,20 @@ class PlaybackService : MediaLibraryService() {
         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
         .build()
 
-    // 로고는 이미지 데이터 대신 주소(content://)로 전달 → 오토가 같은 그림을 매번 다시 그리지 않음
+    // 로고 주소(content://): 오토·알림이 직접 불러감. 모든 채널에 붙임
     private fun logoUri(ch: Channel): Uri? = LogoProvider.uriFor(this, ch.logo)
+
+    // 로고 이미지 데이터: 갤럭시 워치 플러그인(Media3 컨트롤러)은 주소를 직접 열지 않아서
+    // 재생 중인 채널에만 데이터로도 붙임 (큐 전체에 붙이면 전달 데이터가 너무 커짐)
+    private val logoBytesCache = ConcurrentHashMap<String, ByteArray>()
+
+    private fun logoBytes(ch: Channel): ByteArray? {
+        val logo = ch.logo ?: return null
+        if (!logo.startsWith(LogoCache.ASSET_PREFIX)) return null
+        return logoBytesCache[logo] ?: runCatching {
+            assets.open(logo.removePrefix(LogoCache.ASSET_PREFIX)).use { it.readBytes() }
+        }.getOrNull()?.also { logoBytesCache[logo] = it }
+    }
 
     // 네트워크 복구 감지
     private val connectivity by lazy { getSystemService(ConnectivityManager::class.java) }
@@ -654,6 +673,7 @@ class PlaybackService : MediaLibraryService() {
             val exo = exoPlayer ?: return
             val count = exo.mediaItemCount
             if (count == 0) return
+            val currentIdx = exo.currentMediaItemIndex
 
             val epg = EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true)
             val byId = allChannels.associateBy { it.id }
@@ -663,14 +683,18 @@ class PlaybackService : MediaLibraryService() {
                 val item = exo.getMediaItemAt(i)
                 val ch = byId[item.mediaId] ?: return@map item
                 val program = epg.display(ch.epg)
-                val artist = program?.let {
-                    if (it.subTitle.isNullOrBlank()) it.title else "${it.title} · ${it.subTitle}"
-                } ?: ch.group
+                val artist = program?.let { programLabel(it) } ?: ch.group
+                val subtitle = program?.let { programWithTime(it) } ?: ch.group
                 val wantArt = logoUri(ch)
+                val wantData = if (i == currentIdx) logoBytes(ch) else null
+                val curData = item.mediaMetadata.artworkData
+                val dataSame = (curData == null && wantData == null) ||
+                        (curData != null && wantData != null && curData.contentEquals(wantData))
 
                 val cur = item.mediaMetadata
                 if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist &&
-                    cur.artworkUri == wantArt && cur.artworkData == null) {
+                    cur.subtitle?.toString() == subtitle && cur.displayTitle?.toString() == ch.name &&
+                    cur.artworkUri == wantArt && dataSame) {
                     item
                 } else {
                     changed = true
@@ -679,8 +703,10 @@ class PlaybackService : MediaLibraryService() {
                             cur.buildUpon()
                                 .setTitle(ch.name)
                                 .setArtist(artist)
+                                .setDisplayTitle(ch.name)
+                                .setSubtitle(subtitle)
                                 .setArtworkUri(wantArt)
-                                .setArtworkData(null, null)
+                                .setArtworkData(wantData, if (wantData != null) MediaMetadata.PICTURE_TYPE_FRONT_COVER else null)
                                 .build()
                         )
                         .build()
@@ -772,6 +798,10 @@ class PlaybackService : MediaLibraryService() {
                 MediaMetadata.Builder()
                     .setTitle(ch.name)
                     .setArtist(ch.group)
+                    // 오토·블루투스 차량 화면은 displayTitle이 있을 때 subtitle(방송 시간 포함)을 부제로 씀.
+                    // 폰 알림·잠금화면·워치는 artist(프로그램명만)를 씀
+                    .setDisplayTitle(ch.name)
+                    .setSubtitle(ch.group)
                     // 내장 로고는 LogoProvider 주소(content://), 인터넷 로고는 그 주소 그대로
                     .setArtworkUri(logoUri(ch))
                     .build()
@@ -782,17 +812,27 @@ class PlaybackService : MediaLibraryService() {
         return builder.build()
     }
 
-    /** 재생 항목에 방송 정보(프로그램명)를 채움 (로고 주소는 placeholderItem에서) */
-    private fun decoratedItem(ch: Channel, epg: EpgData?): MediaItem {
+    /** 프로그램명 (부제가 있으면 "제목 · 부제") */
+    private fun programLabel(p: Program): String =
+        if (p.subTitle.isNullOrBlank()) p.title else "${p.title} · ${p.subTitle}"
+
+    /** 프로그램명 + 방송 시간: "제목 · 부제 (05:00–06:00)" */
+    private fun programWithTime(p: Program): String {
+        val f = SimpleDateFormat("HH:mm", Locale.KOREA)
+        return "${programLabel(p)} (${f.format(Date(p.start))}–${f.format(Date(p.stop))})"
+    }
+
+    /** 재생 항목에 방송 정보(프로그램명)와 로고 데이터(재생 시작 채널만)를 채움 */
+    private fun decoratedItem(ch: Channel, epg: EpgData?, withArt: Boolean): MediaItem {
         val item = placeholderItem(ch)
         val program = epg?.display(ch.epg)
-        val artist = program?.let {
-            if (it.subTitle.isNullOrBlank()) it.title else "${it.title} · ${it.subTitle}"
-        } ?: ch.group
+        val data = if (withArt) logoBytes(ch) else null
         return item.buildUpon()
             .setMediaMetadata(
                 item.mediaMetadata.buildUpon()
-                    .setArtist(artist)
+                    .setArtist(program?.let { programLabel(it) } ?: ch.group)
+                    .setSubtitle(program?.let { programWithTime(it) } ?: ch.group)
+                    .setArtworkData(data, if (data != null) MediaMetadata.PICTURE_TYPE_FRONT_COVER else null)
                     .build()
             )
             .build()
@@ -803,7 +843,7 @@ class PlaybackService : MediaLibraryService() {
         val epg = runCatching {
             EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true, offline = true)
         }.getOrNull()
-        return list.map { ch -> decoratedItem(ch, epg) }
+        return list.mapIndexed { i, ch -> decoratedItem(ch, epg, i == startIdx) }
     }
 
     /** 플레이어가 주소를 열기 직전에 호출됨 (백그라운드 스레드) */
@@ -838,9 +878,21 @@ class PlaybackService : MediaLibraryService() {
 
     // ---------------- 세션 콜백 ----------------
 
-    // ---------------- 안드로이드 오토 목록 (탭: 즐겨찾기 / 전체 채널) ----------------
+    // ---------------- 안드로이드 오토 목록 (탭: 즐겨찾기 / 채널 목록(목록형) / 채널 목록(타일형)) ----------------
 
-    private fun folderItem(id: String, title: String): MediaItem =
+    /** 앱 리소스 아이콘 주소 (오토 탭 아이콘용) */
+    private fun resUri(resId: Int): Uri = Uri.Builder()
+        .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
+        .authority(resources.getResourcePackageName(resId))
+        .appendPath(resources.getResourceTypeName(resId))
+        .appendPath(resources.getResourceEntryName(resId))
+        .build()
+
+    /**
+     * 오토 탭(폴더). style = 안의 채널 모양 (MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_*),
+     * icon = 탭에 표시할 단색 벡터 아이콘 (루트는 null)
+     */
+    private fun folderItem(id: String, title: String, style: Int, icon: Int?): MediaItem =
         MediaItem.Builder()
             .setMediaId(id)
             .setMediaMetadata(
@@ -849,18 +901,22 @@ class PlaybackService : MediaLibraryService() {
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS)
+                    .setArtworkUri(icon?.let { resUri(it) })
+                    .setExtras(Bundle().apply {
+                        putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE, style)
+                    })
                     .build()
             )
             .build()
 
-    /** 오토 목록용 채널 항목 */
-    private fun browseItem(ch: Channel): MediaItem =
+    /** 오토 목록용 채널 항목. 부제는 지금 방송 중인 프로그램(없으면 방송사) */
+    private fun browseItem(ch: Channel, epg: EpgData?): MediaItem =
         MediaItem.Builder()
             .setMediaId(ch.id)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(ch.name)
-                    .setArtist(ch.group)
+                    .setArtist(epg?.display(ch.epg)?.let { programLabel(it) } ?: ch.group)
                     .setIsBrowsable(false)
                     .setIsPlayable(true)
                     .setArtworkUri(logoUri(ch))
@@ -868,6 +924,11 @@ class PlaybackService : MediaLibraryService() {
                     .build()
             )
             .build()
+
+    /** 오토 목록용 편성표 (저장본으로 빠르게) */
+    private suspend fun browseEpg(): EpgData? = runCatching {
+        EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true, offline = true)
+    }.getOrNull()
 
     private inner class SessionCallback : MediaLibrarySession.Callback {
 
@@ -878,7 +939,7 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<MediaItem>> {
             Log.i("KRadio", "오토 목록 요청(루트): ${browser.packageName}")
             return Futures.immediateFuture(
-                LibraryResult.ofItem(folderItem(ROOT_ID, "케이라디오"), params)
+                LibraryResult.ofItem(folderItem(ROOT_ID, "케이라디오", MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM, null), params)
             )
         }
 
@@ -895,15 +956,26 @@ class PlaybackService : MediaLibraryService() {
                 try {
                     val items: List<MediaItem> = when (parentId) {
                         ROOT_ID -> listOf(
-                            folderItem(FAV_ID, "즐겨찾기"),
-                            folderItem(ALL_ID, "전체 채널")
+                            folderItem(FAV_ID, "즐겨찾기",
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, R.drawable.ic_tab_star),
+                            folderItem(ALL_ID, "채널 목록",
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM, R.drawable.ic_tab_list),
+                            // 같은 채널을 작은 타일로 (스크롤 줄이기용)
+                            folderItem(ALL_GRID_ID, "채널 타일",
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, R.drawable.ic_tab_grid)
                         )
                         FAV_ID -> {
-                            val list = getChannels()
+                            // 위젯과 같은 기준: 채널 관리 순서, 숨긴 채널 제외, 최대 3개
                             val fav = ChannelPrefs.read(this@PlaybackService).favorites
-                            fav.mapNotNull { id -> list.firstOrNull { it.id == id } }.map { browseItem(it) }
+                            val epg = browseEpg()
+                            getChannels().filter { it.id in fav }
+                                .take(ChannelPrefs.MAX_FAVORITES)
+                                .map { browseItem(it, epg) }
                         }
-                        ALL_ID -> getChannels().map { browseItem(it) }
+                        ALL_ID, ALL_GRID_ID -> {
+                            val epg = browseEpg()
+                            getChannels().map { browseItem(it, epg) }
+                        }
                         else -> emptyList()
                     }
                     Log.i("KRadio", "오토 목록: $parentId → ${items.size}개")
@@ -925,7 +997,7 @@ class PlaybackService : MediaLibraryService() {
             scope.launch {
                 val ch = runCatching { getChannels() }.getOrNull()?.firstOrNull { it.id == mediaId }
                 future.set(
-                    if (ch != null) LibraryResult.ofItem(browseItem(ch), null)
+                    if (ch != null) LibraryResult.ofItem(browseItem(ch, null), null)
                     else LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
                 )
             }
@@ -938,7 +1010,7 @@ class PlaybackService : MediaLibraryService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): ListenableFuture<MediaSession.ConnectionResult> {
-            Log.i("KRadio", "컨트롤러 연결: ${controller.packageName} (trusted=${controller.isTrusted})")
+            Log.i("KRadio", "컨트롤러 연결: ${controller.packageName} (trusted=${controller.isTrusted}, ver=${controller.controllerVersion})")
             // 앱 화면이 연결됨 = 사용자가 앱을 연 상태 → 보류했던 오디오 포커스 처리를 다시 켬
             val scheduled = controller.connectionHints.getBoolean("scheduled", false)
             if (focusDeferred && controller.packageName == packageName && !scheduled) {
