@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.6.0 (Unreleased)
+## 1.6.0 (2026-10-03)
 
 ### New
 - **Android Auto support**: the app now appears as a media app in Android Auto.
