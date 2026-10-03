@@ -59,7 +59,7 @@ fi
 
 echo "▶ 4. 구글 드라이브 업로드"
 rclone copy "$APK" "$DRIVE"
-rclone ls "$DRIVE" | grep -q "KRadio-$VER.apk" || { echo "   업로드 확인 실패"; exit 1; }
+rclone ls "$DRIVE" | grep "KRadio-$VER.apk" > /dev/null || { echo "   업로드 확인 실패"; exit 1; }
 echo "   업로드 확인"
 
 echo "▶ 5. 앱 내 업데이트 알림 켜기 (channels.json)"
