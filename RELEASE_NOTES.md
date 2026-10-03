@@ -4,6 +4,20 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.6.1 (Unreleased)
+
+### Improved
+- Home screen widget fits narrower screens such as bar-type phones.
+  - Play buttons and volume share one row from 300dp wide (was 330dp); the date and time are shown at that width with a smaller clock.
+  - When the widget is short, the volume row and then the favorites row are hidden instead of being cut off.
+  - When there is spare height, the logo, buttons and favorites get larger instead of leaving empty space.
+  - Buttons, favorites and the volume gauge use a lighter background so they stand out from the widget.
+
+### Fixed
+- Favorites row cut off at the bottom of the widget on some phones.
+
+---
+
 ## 1.6.0 (2026-10-03)
 
 ### New
