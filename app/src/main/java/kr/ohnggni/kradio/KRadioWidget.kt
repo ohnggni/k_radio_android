@@ -66,6 +66,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import android.util.TypedValue
 import android.widget.RemoteViews
 import androidx.compose.ui.graphics.toArgb
 import androidx.glance.appwidget.AndroidRemoteViews
@@ -322,7 +323,8 @@ class KRadioWidget : GlanceAppWidget() {
 
     private val small = DpSize(180.dp, 80.dp)
     private val large = DpSize(180.dp, 150.dp)
-    private val wideLarge = DpSize(330.dp, 150.dp)
+    private val wideLarge = DpSize(300.dp, 150.dp)   // 이 폭부터 재생 버튼과 음량을 한 줄에
+    private val roomyWidth = 360.dp                   // 이 폭 미만이면 시계·음량 버튼을 조금 작게
     override val sizeMode = SizeMode.Exact   // 실제 위젯 크기를 받아서 음량 막대 폭 계산
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -351,7 +353,28 @@ class KRadioWidget : GlanceAppWidget() {
         val size = LocalSize.current
         val isLarge = size.height >= large.height
         val isWide = isLarge && size.width >= wideLarge.width
-        val showVol = isLarge && (st.car || st.vol >= 0)
+        val showClock = isWide
+        val compact = size.width < roomyWidth            // 좁으면 시계·음량 버튼·간격을 조금 작게
+        val wantVol = isLarge && (st.car || st.vol >= 0)
+        val hasFavs = isLarge && favs.isNotEmpty()
+
+        // 높이가 모자라면 잘리지 않게 줄을 뺌: 음량 줄(좁은 배치일 때만 따로 한 줄) 먼저, 그다음 즐겨찾기
+        // 필요 높이(dp): 위아래 여백 24 + 정보 46 + 간격 12 + 재생 버튼 50
+        val hv = size.height.value
+        val baseH = 24f + 46f + 12f + 50f
+        val volH = 10f + 42f
+        val favH = 12f + 38f
+        val volInline = isWide && wantVol
+        val (volRow, showFavs) = when {
+            isWide || !wantVol -> false to (hasFavs && hv >= baseH + favH)
+            !hasFavs -> (hv >= baseH + volH) to false
+            hv >= baseH + volH + favH -> true to true
+            hv >= baseH + favH -> false to true
+            else -> (hv >= baseH + volH) to false
+        }
+        // 높이가 넉넉하면(30dp 이상 남으면) 로고·버튼·즐겨찾기를 키워서 빈 공간을 채움 (+약 26dp)
+        val needH = baseH + (if (volRow) volH else 0f) + (if (showFavs) favH else 0f)
+        val big = hv >= needH + 30f
 
         Column(
             GlanceModifier
@@ -373,7 +396,7 @@ class KRadioWidget : GlanceAppWidget() {
                         Image(
                             ImageProvider(logo),
                             contentDescription = st.name,
-                            modifier = GlanceModifier.size(46.dp).cornerRadius(10.dp)
+                            modifier = GlanceModifier.size(if (big) 56.dp else 46.dp).cornerRadius(10.dp)
                         )
                         Spacer(GlanceModifier.width(12.dp))
                     }
@@ -383,20 +406,20 @@ class KRadioWidget : GlanceAppWidget() {
                             maxLines = 1,
                             style = TextStyle(
                                 color = colors.onPrimaryContainer,
-                                fontSize = 18.sp,
+                                fontSize = if (big) 20.sp else 18.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         )
                         Text(
                             st.program,
                             maxLines = 1,
-                            style = TextStyle(color = colors.onPrimaryContainer, fontSize = 14.sp)
+                            style = TextStyle(color = colors.onPrimaryContainer, fontSize = if (big) 15.sp else 14.sp)
                         )
                     }
                 }
-                if (isWide) {
+                if (showClock) {
                     Spacer(GlanceModifier.width(8.dp))
-                    Clock(c)
+                    Clock(c, if (compact) 76.dp else 100.dp, small = compact)
                 }
             }
 
@@ -408,27 +431,28 @@ class KRadioWidget : GlanceAppWidget() {
                 horizontalAlignment = if (isWide) Alignment.Start else Alignment.CenterHorizontally,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Controls(c, st)
-                if (isWide && showVol) {
-                    Spacer(GlanceModifier.width(16.dp))
-                    VolumeControls(c, st)
+                // 좁은 폭에서 음량과 한 줄이면 버튼은 키우지 않음 (게이지 자리 확보)
+                Controls(c, st, big && !(volInline && compact))
+                if (volInline) {
+                    Spacer(GlanceModifier.width(if (compact) 10.dp else 16.dp))
+                    VolumeControls(c, st, compact)
                 }
             }
 
             // ---------- 좁은 큰 위젯: 음량은 아래 줄 가운데 ----------
-            if (showVol && !isWide) {
+            if (volRow) {
                 Spacer(GlanceModifier.height(10.dp))
                 Row(
                     GlanceModifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    VolumeControls(c, st)
+                    VolumeControls(c, st, compact = false)
                 }
             }
 
             // ---------- 즐겨찾기 ----------
-            if (isLarge && favs.isNotEmpty()) {
+            if (showFavs) {
                 Spacer(GlanceModifier.height(12.dp))
                 Row(GlanceModifier.fillMaxWidth()) {
                     favs.forEachIndexed { i, (id, name) ->
@@ -437,9 +461,9 @@ class KRadioWidget : GlanceAppWidget() {
                         Box(
                             GlanceModifier
                                 .defaultWeight()
-                                .height(38.dp)
-                                .cornerRadius(19.dp)
-                                .background(if (on) colors.primary else colors.secondaryContainer)
+                                .height(if (big) 44.dp else 38.dp)
+                                .cornerRadius(if (big) 22.dp else 19.dp)
+                                .background(if (on) colors.primary else colors.surface)
                                 .clickable(
                                     // 재생 중: 서비스에 직접 (빠름) / 정지 중: 수신기를 거쳐 재생 시작
                                     if (st.playing) {
@@ -459,7 +483,7 @@ class KRadioWidget : GlanceAppWidget() {
                                 name,
                                 maxLines = 1,
                                 style = TextStyle(
-                                    color = if (on) colors.onPrimary else colors.onSecondaryContainer,
+                                    color = if (on) colors.onPrimary else colors.onSurface,
                                     fontSize = 14.sp,
                                     fontWeight = if (on) FontWeight.Bold else FontWeight.Normal
                                 ),
@@ -474,9 +498,11 @@ class KRadioWidget : GlanceAppWidget() {
 
     /** 이전 · 재생/정지 · 다음 */
     @Composable
-    private fun Controls(c: Context, st: WidgetState.Data) {
+    private fun Controls(c: Context, st: WidgetState.Data, big: Boolean) {
+        val side = if (big) 46.dp else 40.dp
+        val main = if (big) 60.dp else 50.dp
         Row(verticalAlignment = Alignment.CenterVertically) {
-            RoundButton(R.drawable.ic_w_prev, "이전 채널", broadcast(c, WidgetActionReceiver.ACTION_PREV), 40.dp, filled = false)
+            RoundButton(R.drawable.ic_w_prev, "이전 채널", broadcast(c, WidgetActionReceiver.ACTION_PREV), side, filled = false)
             Spacer(GlanceModifier.width(10.dp))
             RoundButton(
                 if (st.playing) R.drawable.ic_w_stop else R.drawable.ic_w_play,
@@ -489,11 +515,11 @@ class KRadioWidget : GlanceAppWidget() {
                 } else {
                     broadcast(c, WidgetActionReceiver.ACTION_PLAY_PAUSE)
                 },
-                50.dp,
+                main,
                 filled = true
             )
             Spacer(GlanceModifier.width(10.dp))
-            RoundButton(R.drawable.ic_w_next, "다음 채널", broadcast(c, WidgetActionReceiver.ACTION_NEXT), 40.dp, filled = false)
+            RoundButton(R.drawable.ic_w_next, "다음 채널", broadcast(c, WidgetActionReceiver.ACTION_NEXT), side, filled = false)
         }
     }
 
@@ -502,15 +528,17 @@ class KRadioWidget : GlanceAppWidget() {
      * Glance는 한 줄에 최대 10개까지만 그리므로 5칸씩 묶어서 배치.
      */
     @Composable
-    private fun RowScope.VolumeControls(c: Context, st: WidgetState.Data) {
+    private fun RowScope.VolumeControls(c: Context, st: WidgetState.Data, compact: Boolean) {
+        val btn = if (compact) 36.dp else 42.dp
+        val gap = if (compact) 6.dp else 10.dp
         val colors = GlanceTheme.colors
         // 오토 연결 중: 앱 음량 0~300%를 20%씩 15칸 (5칸 = 100%) / 평소: 폰 음량 단계
         val steps = if (st.car) AppVolume.MAX / WidgetActionReceiver.APP_STEP else st.volMax.coerceIn(5, 30)
         val filled = if (st.car) (st.appVol + WidgetActionReceiver.APP_STEP / 2) / WidgetActionReceiver.APP_STEP
                      else st.vol.coerceIn(0, steps)
 
-        RoundButton(R.drawable.ic_w_minus, "음량 줄이기", broadcast(c, WidgetActionReceiver.ACTION_VOL_DOWN), 42.dp, filled = false)
-        Spacer(GlanceModifier.width(10.dp))
+        RoundButton(R.drawable.ic_w_minus, "음량 줄이기", broadcast(c, WidgetActionReceiver.ACTION_VOL_DOWN), btn, filled = false)
+        Spacer(GlanceModifier.width(gap))
 
         Row(GlanceModifier.defaultWeight(), verticalAlignment = Alignment.Bottom) {
             (0 until steps).chunked(5).forEach { group ->
@@ -526,7 +554,7 @@ class KRadioWidget : GlanceAppWidget() {
                                     .fillMaxWidth()
                                     .height((8 + i * 16f / (steps - 1)).dp)   // 8dp → 24dp로 점점 높아지는 막대
                                     .cornerRadius(2.dp)
-                                    .background(if (i < filled) colors.primary else colors.secondaryContainer)
+                                    .background(if (i < filled) colors.primary else colors.surface)
                             ) {}
                         }
                     }
@@ -543,19 +571,24 @@ class KRadioWidget : GlanceAppWidget() {
                 style = TextStyle(color = colors.onPrimaryContainer, fontSize = 12.sp)
             )
         }
-        Spacer(GlanceModifier.width(10.dp))
-        RoundButton(R.drawable.ic_w_plus, "음량 키우기", broadcast(c, WidgetActionReceiver.ACTION_VOL_UP), 42.dp, filled = false)
+        Spacer(GlanceModifier.width(gap))
+        RoundButton(R.drawable.ic_w_plus, "음량 키우기", broadcast(c, WidgetActionReceiver.ACTION_VOL_UP), btn, filled = false)
     }
 
     /** 날짜(작게) + 시각(크게): 채널명·방송명 두 줄 높이. 매분 자동 갱신 */
     @Composable
-    private fun Clock(c: Context) {
+    private fun Clock(c: Context, width: Dp, small: Boolean) {
         val base = GlanceTheme.colors.onPrimaryContainer.getColor(c)
         val rv = RemoteViews(c.packageName, R.layout.widget_clock).apply {
             setTextColor(R.id.widget_date, base.copy(alpha = 0.7f).toArgb())
             setTextColor(R.id.widget_clock, base.toArgb())
+            if (small) {
+                // 좁은 위젯: 채널명 자리를 남기려고 시계를 작게
+                setTextViewTextSize(R.id.widget_date, TypedValue.COMPLEX_UNIT_SP, 13f)
+                setTextViewTextSize(R.id.widget_clock, TypedValue.COMPLEX_UNIT_SP, 22f)
+            }
         }
-        AndroidRemoteViews(rv, modifier = GlanceModifier.width(100.dp))
+        AndroidRemoteViews(rv, modifier = GlanceModifier.width(width))
     }
 
     @Composable
@@ -565,14 +598,14 @@ class KRadioWidget : GlanceAppWidget() {
             GlanceModifier
                 .size(size)
                 .cornerRadius(size / 2)
-                .background(if (filled) colors.primary else colors.secondaryContainer)
+                .background(if (filled) colors.primary else colors.surface)
                 .clickable(action),
             contentAlignment = Alignment.Center
         ) {
             Image(
                 ImageProvider(icon),
                 contentDescription = desc,
-                colorFilter = ColorFilter.tint(if (filled) colors.onPrimary else colors.onSecondaryContainer),
+                colorFilter = ColorFilter.tint(if (filled) colors.onPrimary else colors.onSurface),
                 modifier = GlanceModifier.size(size * 0.55f)
             )
         }
