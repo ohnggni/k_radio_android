@@ -166,7 +166,10 @@ class PlaybackService : MediaLibraryService() {
 
     private fun logoBytes(ch: Channel): ByteArray? {
         val logo = ch.logo ?: return null
-        if (!logo.startsWith(LogoCache.ASSET_PREFIX)) return null
+        // 인터넷 로고: 미리 받아둔 저장본이 있으면 그걸로 (없으면 다음 갱신 때)
+        if (!logo.startsWith(LogoCache.ASSET_PREFIX)) {
+            return logoBytesCache[logo] ?: LogoProvider.remoteBytes(this, logo)?.also { logoBytesCache[logo] = it }
+        }
         return logoBytesCache[logo] ?: runCatching {
             assets.open(logo.removePrefix(LogoCache.ASSET_PREFIX)).use { it.readBytes() }
         }.getOrNull()?.also { logoBytesCache[logo] = it }
@@ -758,7 +761,25 @@ class PlaybackService : MediaLibraryService() {
         val p = ChannelPrefs.read(this)
         val all = ChannelPrefs.applyOrder(base, p)
         allChannels = all
+        prefetchRemoteLogos(all)
         return all.filter { it.id !in p.hidden }
+    }
+
+    // 인터넷 주소 로고(직접 추가·수정한 채널)는 미리 내려받아 content:// 로 제공 (오토·워치용)
+    private val prefetchedLogos = mutableSetOf<String>()
+
+    private fun prefetchRemoteLogos(list: List<Channel>) {
+        val urls = list.mapNotNull { it.logo }
+            .filter { it.startsWith("http") && it !in prefetchedLogos }
+            .distinct()
+        if (urls.isEmpty()) return
+        prefetchedLogos += urls
+        scope.launch(Dispatchers.IO) {
+            var got = false
+            urls.forEach { if (LogoProvider.prefetch(this@PlaybackService, it)) got = true }
+            // 새로 받았으면 재생 중 채널 그림(워치용 이미지 데이터)도 바로 반영
+            if (got) launch(Dispatchers.Main) { updateNowPlaying() }
+        }
     }
 
     /** 재생 중인 채널은 그대로 두고 앞뒤 채널만 새 순서로 교체 (소리 끊김 없음) */

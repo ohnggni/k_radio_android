@@ -4,6 +4,13 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.7.2 (Unreleased)
+
+### Fixed
+- Logos of custom channels (logo set to a web address) not shown in Android Auto and on Galaxy Watch. These logos are now downloaded once, kept on the phone and provided the same way as built-in logos. A new logo address is downloaded again automatically.
+
+---
+
 ## 1.7.1 (2026-10-04)
 
 ### Fixed
