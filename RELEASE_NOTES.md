@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.6.1 (Unreleased)
+## 1.6.1 (2026-10-03)
 
 ### Improved
 - Home screen widget fits narrower screens such as bar-type phones.
