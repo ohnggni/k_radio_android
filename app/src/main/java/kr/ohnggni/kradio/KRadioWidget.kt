@@ -63,7 +63,6 @@ import androidx.media3.session.SessionToken
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import android.util.TypedValue
@@ -200,7 +199,8 @@ class WidgetActionReceiver : BroadcastReceiver() {
         when (val action = intent.action) {
             ACTION_VOL_UP, ACTION_VOL_DOWN -> CoroutineScope(Dispatchers.Main).launch {
                 // 오토 연결 중: 폰 음량은 차 소리와 무관 → 앱 음량을 20%씩 조절
-                val inCar = withContext(Dispatchers.IO) { CarLink.query(app) }
+                // (재생 서비스가 저장한 값만 읽음. 오토에 직접 물으면 꺼져 있던 오토가 깨어나 수 초 걸림)
+                val inCar = CarLink.isConnected(app)
                 if (inCar) {
                     val cur = AppVolume.get(app)
                     val next = if (action == ACTION_VOL_UP) (cur / APP_STEP + 1) * APP_STEP
@@ -294,8 +294,9 @@ class WidgetActionReceiver : BroadcastReceiver() {
         }, ContextCompat.getMainExecutor(c))
     }
 
+    /** 명령 전달 후 버튼 처리 끝냄 (길게 붙잡으면 다음 위젯 버튼이 밀림) */
     private fun done(pending: PendingResult) {
-        Handler(Looper.getMainLooper()).postDelayed({ pending.finish() }, 1_000)
+        Handler(Looper.getMainLooper()).postDelayed({ pending.finish() }, 200)
     }
 
     /** 켜짐 예약과 같은 방식으로 백그라운드에서 시작 (음량 유지, 바로 소리) */
@@ -304,9 +305,12 @@ class WidgetActionReceiver : BroadcastReceiver() {
             pending.finish()
             return
         }
+        // 재생 명령을 보내자마자 버튼 처리를 끝냄. 8초를 붙잡고 있으면 그동안 누른
+        // 다른 위젯 버튼(음량 등)이 줄 서서 기다려서 몇 초씩 늦게 반응함
         ScheduleStarter.playChannel(
-            c, channelId, null, autoOff = 0, volume = null, fade = false, source = "위젯"
-        ) { pending.finish() }
+            c, channelId, null, autoOff = 0, volume = null, fade = false, source = "위젯",
+            onSent = { pending.finish() }
+        ) { }
     }
 }
 

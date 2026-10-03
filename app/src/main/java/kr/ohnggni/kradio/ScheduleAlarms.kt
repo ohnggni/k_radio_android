@@ -110,7 +110,8 @@ object ScheduleStarter {
         volume: Int?,          // null이면 폰 음량 그대로
         fade: Boolean,
         source: String,
-        done: () -> Unit,
+        onSent: () -> Unit = {},   // 재생 명령을 보낸 직후 (위젯: 여기서 버튼 처리를 끝내야 다음 버튼이 안 밀림)
+        done: () -> Unit,          // 연결 정리까지 끝난 뒤 (8초 후)
     ) {
         // 채널 확인: 숨기거나 삭제한 채널이면 엉뚱한 채널을 틀지 않고 알림만
         val base = ChannelRepository.loadCached(c)
@@ -148,6 +149,7 @@ object ScheduleStarter {
                 ctl.play()
                 Log.i("KRadio", "$source 재생 요청: $name")
             }.onFailure { Log.e("KRadio", "$source 재생 요청 실패", it) }
+            onSent()
             // 서비스가 재생을 시작할 시간을 준 뒤 연결 해제
             Handler(Looper.getMainLooper()).postDelayed({
                 MediaController.releaseFuture(future)
