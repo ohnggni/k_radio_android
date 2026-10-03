@@ -4,6 +4,20 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.7.0 (Unreleased)
+
+### New
+- **Text size** (Settings → Display → Text size): follow the phone setting (default), or a fixed size for the app regardless of the phone font size: small 85%, normal 100%, large 115%, extra large 130%. Applies to all app screens and dialogs; the widget follows the phone setting.
+
+### Improved
+- Player: channel name, program and playback status on three separate lines, so the channel name uses the full width.
+- Top banner: sleep timer, scheduled start and settings now look like buttons (rounded background with a short label under the icon), placed closer to the right edge and always within the right half.
+
+### Fixed
+- Settings button announced as "channel management" by screen readers.
+
+---
+
 ## 1.6.1 (2026-10-03)
 
 ### Improved

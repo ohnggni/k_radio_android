@@ -1,5 +1,7 @@
 package kr.ohnggni.kradio
 
+import androidx.compose.ui.platform.LocalConfiguration
+import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -34,6 +36,8 @@ fun SettingsScreen(
     channels: List<Channel>,
     startupMode: String,
     startupChannel: String?,
+    textScale: Int,
+    onSaveTextScale: (Int) -> Unit,
     onSaveStartup: (String, String?) -> Unit,
     scheduleSummary: String,
     onOpenSchedules: () -> Unit,
@@ -41,6 +45,7 @@ fun SettingsScreen(
     var editConfig by remember { mutableStateOf(false) }
     var editEpg by remember { mutableStateOf(false) }
     var editStartup by remember { mutableStateOf(false) }
+    var editTextScale by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -88,6 +93,13 @@ fun SettingsScreen(
             )
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+            SectionTitle("화면")
+            SettingRow(
+                title = "글자 크기",
+                value = TextScale.label(textScale),
+                onClick = { editTextScale = true }
+            )
 
             SectionTitle("데이터 출처")
             SettingRow(
@@ -156,6 +168,13 @@ fun SettingsScreen(
             guide = "XMLTV 형식(xmltv.xml) 파일 주소를 입력하세요. 비워두면 채널 설정 파일에 지정된 편성표나 기본 제공 편성표를 사용해요.",
             onDismiss = { editEpg = false },
             onSave = { onSaveEpg(it); editEpg = false }
+        )
+    }
+    if (editTextScale) {
+        TextScaleDialog(
+            current = textScale,
+            onDismiss = { editTextScale = false },
+            onSave = { onSaveTextScale(it); editTextScale = false }
         )
     }
     if (editStartup) {
@@ -319,6 +338,33 @@ private fun StartupDialog(
                 onClick = { onSave(mode, if (mode == StartupSettings.MODE_FIXED) chId else null) }
             ) { Text("저장") }
         },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+    )
+}
+
+@Composable
+private fun TextScaleDialog(current: Int, onDismiss: () -> Unit, onSave: (Int) -> Unit) {
+    var sel by remember { mutableStateOf(current) }
+    // 앱 배율을 덮어써도 Configuration의 fontScale은 폰 설정값 그대로
+    val phone = (LocalConfiguration.current.fontScale * 100).roundToInt()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("글자 크기") },
+        text = {
+            Column {
+                Text(
+                    "지금 폰 글꼴 크기: $phone%\n" +
+                            "폰 글꼴을 크게 쓰는데 앱 화면이 비좁으면 앱만 따로 크기를 정할 수 있어요. 위젯은 폰 설정을 따라요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                TextScale.OPTIONS.forEach { v ->
+                    ModeOption(TextScale.label(v), sel == v) { sel = v }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(sel) }) { Text("저장") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
     )
 }
