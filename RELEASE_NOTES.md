@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.7.0 (Unreleased)
+## 1.7.0 (2026-10-03)
 
 ### New
 - **Text size** (Settings → Display → Text size): follow the phone setting (default), or a fixed size for the app regardless of the phone font size: small 85%, normal 100%, large 115%, extra large 130%. Applies to all app screens and dialogs; the widget follows the phone setting.
