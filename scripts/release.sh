@@ -51,8 +51,12 @@ DEVICES=$(adb devices | awk 'NR>1 && $2=="device" {print $1}')
 DEVICE=$(echo "$DEVICES" | grep -m1 "R5KL700JYQN" || echo "$DEVICES" | head -1)
 if [ -n "$DEVICE" ]; then
   echo "   기기: $DEVICE"
-  adb -s "$DEVICE" install -r "$APK"
-  read -r -p "   폰에서 동작 확인 후 Enter (중단하려면 Ctrl+C) " _
+  if adb -s "$DEVICE" install -r "$APK"; then
+    read -r -p "   폰에서 동작 확인 후 Enter (중단하려면 Ctrl+C) " _
+  else
+    # 무선 연결이 끊기는 등 설치만 실패한 경우: 배포는 이어서 할 수 있게
+    read -r -p "   ⚠️ 설치 실패. 그래도 배포를 계속하려면 Enter (중단하려면 Ctrl+C) " _
+  fi
 else
   echo "   폰이 연결되지 않아 건너뜀"
 fi
