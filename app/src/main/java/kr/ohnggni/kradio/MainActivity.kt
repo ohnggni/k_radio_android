@@ -1,6 +1,5 @@
 package kr.ohnggni.kradio
 
-import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
@@ -94,7 +93,6 @@ class MainActivity : ComponentActivity() {
 
     // 안드로이드 오토 연결 중이면 음량 줄을 앱 음량으로
     private var carMode by mutableStateOf(false)
-    private var carReceiver: BroadcastReceiver? = null
 
     private var sysVol by mutableIntStateOf(0)
     private var sysMax by mutableIntStateOf(15)
@@ -108,6 +106,7 @@ class MainActivity : ComponentActivity() {
         if (key == SleepTimer.KEY) sleepAt = SleepTimer.get(this)
         if (key == AppVolume.KEY) appVolume = AppVolume.get(this)   // 위젯에서 바꾼 앱 음량 반영
         if (key == TextScale.KEY) textScale = TextScale.get(this)
+        if (key == CarLink.KEY) carMode = CarLink.isConnected(this)   // 재생 서비스가 저장한 오토 연결 상태
     }
 
     private var scheduleBack = Screen.SETTINGS   // 켜짐 예약 화면에서 뒤로 갈 곳
@@ -325,7 +324,7 @@ class MainActivity : ComponentActivity() {
         readSystemVolume()
         appVolume = AppVolume.get(this)
         contentResolver.registerContentObserver(Settings.System.CONTENT_URI, true, volumeObserver)
-        carReceiver = CarLink.watch(this, lifecycleScope) { carMode = it }
+        carMode = CarLink.isConnected(this)
         // 설정을 받은 지 오래됐으면 다시 확인 (새 버전 알림, 방송 주소 변경 반영)
         if (configLoadedAt > 0 && System.currentTimeMillis() - configLoadedAt > CONFIG_RECHECK_MS) {
             lifecycleScope.launch {
@@ -369,8 +368,6 @@ class MainActivity : ComponentActivity() {
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(sleepPrefListener)
         contentResolver.unregisterContentObserver(volumeObserver)
-        carReceiver?.let { runCatching { unregisterReceiver(it) } }
-        carReceiver = null
         super.onStop()
     }
 

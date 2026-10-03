@@ -351,6 +351,8 @@ class PlaybackService : MediaLibraryService() {
         runCatching { connectivity.registerDefaultNetworkCallback(networkCallback) }
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
             .registerOnSharedPreferenceChangeListener(prefsListener)
+        // 새로 시작할 땐 모름(해제)으로 두고, 오토가 접속해오거나 연결 신호가 오면 확인
+        CarLink.store(this, false)
         carReceiver = CarLink.watch(this, scope) { setCarConnected(it) }
 
         // 매분 정각마다 현재 방송 정보 갱신
@@ -410,16 +412,17 @@ class PlaybackService : MediaLibraryService() {
     }
     // ---------------- 무음 재생 감지 ----------------
 
-    /** 오토 연결 상태가 바뀌면 기록하고 위젯 음량 표시를 바꿈 */
+    /** 오토 연결 상태가 바뀌면 저장(위젯·앱 화면이 읽음)하고 위젯 음량 표시를 바꿈 */
     private fun setCarConnected(on: Boolean) {
+        CarLink.store(this, on)
         if (on == carConnected) return
         carConnected = on
         Log.i("KRadio", "안드로이드 오토 ${if (on) "연결" else "해제"}")
         updateWidget()
     }
 
-    /** 무음 감시용: 신호를 놓쳤을 수도 있으니 직접 다시 조회 */
-    private suspend fun isCarConnected(): Boolean {
+    /** 오토에 직접 조회 (오토가 깨어 있을 때만 부를 것: 접속해왔을 때, 폰 음량이 0일 때) */
+    private suspend fun checkCar(): Boolean {
         val on = withContext(Dispatchers.IO) { CarLink.query(this@PlaybackService) }
         setCarConnected(on)
         return on
@@ -440,8 +443,10 @@ class PlaybackService : MediaLibraryService() {
                 val am = getSystemService(AudioManager::class.java)
                 // 차량(안드로이드 오토 등)이 음량을 관리할 때는 폰 음량 값을 믿을 수 없어서 무시
                 // (오토 연결 중엔 폰 스피커 음량이 0이어도 차에서는 소리가 남)
-                val sysMuted = !isCarConnected() && !am.isVolumeFixed &&
+                // 폰 음량이 0일 때만 오토 연결을 확인 (평소엔 오토를 깨우지 않음)
+                val phoneMuted = !am.isVolumeFixed &&
                         (am.getStreamVolume(AudioManager.STREAM_MUSIC) == 0 || am.isStreamMute(AudioManager.STREAM_MUSIC))
+                val sysMuted = phoneMuted && !(carConnected || checkCar())
                 val muted = AppVolume.get(this@PlaybackService) == 0 || sysMuted
                 if (!muted) {
                     mutedSince = 0L
@@ -1011,6 +1016,8 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo
         ): ListenableFuture<MediaSession.ConnectionResult> {
             Log.i("KRadio", "컨트롤러 연결: ${controller.packageName} (trusted=${controller.isTrusted}, ver=${controller.controllerVersion})")
+            // 오토가 접속해옴 = 오토가 깨어 있음 → 이때 연결 상태 확인 (오토를 새로 깨우지 않음)
+            if (controller.packageName == CarLink.GEARHEAD) scope.launch { checkCar() }
             // 앱 화면이 연결됨 = 사용자가 앱을 연 상태 → 보류했던 오디오 포커스 처리를 다시 켬
             val scheduled = controller.connectionHints.getBoolean("scheduled", false)
             if (focusDeferred && controller.packageName == packageName && !scheduled) {
@@ -1159,6 +1166,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        CarLink.store(this, false)   // 재생 서비스가 없으면 오토 연결을 알 수 없으니 해제로 정리
         runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(prefsListener)
