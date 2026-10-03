@@ -3,7 +3,7 @@
 # 사용법: ./scripts/release.sh 1.1.0
 # 전제: RELEASE_NOTES.md와 앱 한글 변경 내역에 "## <버전> (Unreleased)" 항목이 있어야 함
 set -euo pipefail
-trap 'echo "   ❌ 중단됨 (release.sh $LINENO번째 줄)"' ERR
+trap 'echo "   ❌ 중단됨 (release.sh ${LINENO}번째 줄)"' ERR
 
 VER="${1:?버전을 입력하세요. 예: ./scripts/release.sh 1.1.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
