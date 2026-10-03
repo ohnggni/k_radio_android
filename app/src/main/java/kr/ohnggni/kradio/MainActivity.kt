@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
     private var showSleep by mutableStateOf(false)
 
     private var appVolume by mutableIntStateOf(100)
+    private var textScale by mutableIntStateOf(TextScale.FOLLOW)   // 앱 안 글자 크기
 
     private var volumeSync by mutableStateOf(false)
 
@@ -106,6 +107,7 @@ class MainActivity : ComponentActivity() {
     private val sleepPrefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == SleepTimer.KEY) sleepAt = SleepTimer.get(this)
         if (key == AppVolume.KEY) appVolume = AppVolume.get(this)   // 위젯에서 바꾼 앱 음량 반영
+        if (key == TextScale.KEY) textScale = TextScale.get(this)
     }
 
     private var scheduleBack = Screen.SETTINGS   // 켜짐 예약 화면에서 뒤로 갈 곳
@@ -160,8 +162,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        textScale = TextScale.get(this)
         setContent {
             KRadioTheme {
+            AppTextScale(textScale) {
                 BackHandler(enabled = screen != Screen.MAIN) {
                     screen = when (screen) {
                         Screen.SETTINGS -> Screen.MAIN
@@ -255,6 +259,8 @@ class MainActivity : ComponentActivity() {
                         channels = channels,
                         startupMode = startupMode,
                         startupChannel = startupChannel,
+                        textScale = textScale,
+                        onSaveTextScale = { TextScale.set(this, it) },
                         onSaveStartup = { mode, id ->
                             StartupSettings.save(this, mode, id)
                             startupMode = mode
@@ -302,6 +308,7 @@ class MainActivity : ComponentActivity() {
                         onDelete = { deleteSchedule(it) },
                     )
                 }
+            }   // AppTextScale
             }
         }
     }

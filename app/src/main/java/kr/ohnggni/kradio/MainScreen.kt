@@ -221,7 +221,7 @@ private fun TopBanner(
                 .background(
                     Brush.horizontalGradient(listOf(cs.primaryContainer, cs.secondaryContainer))
                 )
-                .padding(horizontal = 20.dp, vertical = 14.dp)
+                .padding(start = 20.dp, end = 10.dp, top = 12.dp, bottom = 12.dp)
         ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
@@ -243,26 +243,50 @@ private fun TopBanner(
                     color = cs.onPrimaryContainer.copy(alpha = 0.75f)
                 )
             }
-            IconButton(onClick = onOpenSleep, enabled = isOn) {
-                Icon(
-                    IconSleep,
-                    contentDescription = "꺼짐 예약",
-                    tint = if (sleepAt != null) MaterialTheme.colorScheme.primary
-                    else LocalContentColor.current
-                )
-            }
-            IconButton(onClick = onOpenSchedules) {
-                Icon(
-                    IconAlarm,
-                    contentDescription = "켜짐 예약",
-                    tint = if (hasSchedules) MaterialTheme.colorScheme.primary
-                    else LocalContentColor.current
-                )
-            }
-            IconButton(onClick = onSettings) {
-                Icon(IconSettings, contentDescription = "채널 관리", tint = cs.onPrimaryContainer)
-            }
+            // 버튼인 걸 알아보기 쉽게: 바탕 있는 둥근 칸 + 아이콘 아래 이름
+            // 폭 고정(48dp × 3): 글자 크기와 상관없이 배너 오른쪽 절반 안에 머물게
+            BannerButton(IconSleep, "꺼짐", "꺼짐 예약", active = sleepAt != null, enabled = isOn, onClick = onOpenSleep)
+            Spacer(Modifier.width(4.dp))
+            BannerButton(IconAlarm, "켜짐", "켜짐 예약", active = hasSchedules, onClick = onOpenSchedules)
+            Spacer(Modifier.width(4.dp))
+            BannerButton(IconSettings, "설정", "설정", onClick = onSettings)
         }
+    }
+}
+
+/** 상단 배너 버튼: 반투명 바탕의 둥근 칸에 아이콘과 이름. active면 강조색, 비활성은 흐리게 */
+@Composable
+private fun BannerButton(
+    icon: ImageVector,
+    label: String,
+    desc: String,   // 음성 안내용 전체 이름
+    active: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val tint = when {
+        !enabled -> cs.onPrimaryContainer.copy(alpha = 0.38f)
+        active -> cs.primary
+        else -> cs.onPrimaryContainer
+    }
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(cs.surface.copy(alpha = if (enabled) 0.7f else 0.35f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .width(48.dp)
+            .padding(horizontal = 2.dp, vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(22.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 @Composable
@@ -413,7 +437,7 @@ private fun PlayerBar(
                 }
             }
 
-            // ---------- 2줄: 로고 + 채널 정보 3줄 + 재생 버튼 ----------
+            // ---------- 2줄: 로고 + 채널명·방송·상태 3줄 + 재생 버튼 ----------
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -423,38 +447,35 @@ private fun PlayerBar(
                 ChannelLogo(ch?.logo, ch?.name ?: "K", Modifier.size(56.dp))
                 Spacer(Modifier.width(12.dp))
 
-                // 채널명 + 재생 상태 / 방송 정보
+                // 3줄: 채널명 / 방송 정보 / 재생 상태 (채널명이 폭을 다 쓰도록 상태는 따로 한 줄)
                 Column(
                     Modifier.weight(1f).heightIn(min = 56.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
-                    val stateLabel = when {
-                        ch == null -> "대기 중"
-                        isOn -> "● 재생 중"
-                        else -> "정지됨"
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            ch?.name ?: "채널을 선택하세요",
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            listOfNotNull(stateLabel, sleepAt?.let { sleepRemainLabel(it, now) })
-                                .joinToString(" · "),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isOn) MaterialTheme.colorScheme.primary else onContainer.copy(alpha = 0.7f),
-                            maxLines = 1
-                        )
-                    }
+                    Text(
+                        ch?.name ?: "채널을 선택하세요",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     val sub = status.ifEmpty { program?.label() ?: "" }
                     Text(
                         sub.ifEmpty { " " },
                         style = MaterialTheme.typography.bodySmall,
                         color = onContainer.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val stateLabel = when {
+                        ch == null -> "대기 중"
+                        isOn -> "● 재생 중"
+                        else -> "정지됨"
+                    }
+                    Text(
+                        listOfNotNull(stateLabel, sleepAt?.let { sleepRemainLabel(it, now) })
+                            .joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isOn) MaterialTheme.colorScheme.primary else onContainer.copy(alpha = 0.7f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

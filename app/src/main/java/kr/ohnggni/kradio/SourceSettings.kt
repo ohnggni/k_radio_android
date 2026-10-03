@@ -166,3 +166,24 @@ object ScheduledStart {
         sp(c).edit().remove(KEY).apply()
     }
 }
+
+/** 앱 안 글자 크기: FOLLOW = 폰 설정 따름, 그 외는 폰 글꼴과 상관없는 고정 배율(%) */
+object TextScale {
+    const val KEY = "text_scale"
+    const val FOLLOW = 0
+    val OPTIONS = listOf(FOLLOW, 85, 100, 115, 130)
+
+    private fun sp(c: Context) = c.getSharedPreferences(ChannelPrefs.PREFS, Context.MODE_PRIVATE)
+
+    fun get(c: Context): Int = sp(c).getInt(KEY, FOLLOW).takeIf { it in OPTIONS } ?: FOLLOW
+    fun set(c: Context, v: Int) = sp(c).edit().putInt(KEY, v).apply()
+
+    fun label(v: Int): String = when (v) {
+        FOLLOW -> "폰 설정 따름"
+        85 -> "작게 (85%)"
+        100 -> "보통 (100%)"
+        115 -> "크게 (115%)"
+        130 -> "아주 크게 (130%)"
+        else -> "$v%"
+    }
+}
