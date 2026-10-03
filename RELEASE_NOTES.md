@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.7.1 (Unreleased)
+## 1.7.1 (2026-10-04)
 
 ### Fixed
 - Widget volume buttons responding several seconds late right after starting playback from the widget. The play button held its request for 8 seconds, which queued every other widget button behind it.
