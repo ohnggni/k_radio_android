@@ -468,17 +468,24 @@ private fun PlayerBar(
                     )
                     val stateLabel = when {
                         ch == null -> "대기 중"
-                        isOn -> "● 재생 중"
+                        isOn -> "재생 중"
                         else -> "정지됨"
                     }
-                    Text(
-                        listOfNotNull(stateLabel, sleepAt?.let { sleepRemainLabel(it, now) })
-                            .joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isOn) MaterialTheme.colorScheme.primary else onContainer.copy(alpha = 0.7f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isOn) {
+                            // 재생 중 표시: 작은 초록 점 (글자 기호 ●는 글꼴마다 크게 나와서 직접 그림)
+                            Box(Modifier.size(7.dp).background(PlayingGreen, CircleShape))
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        Text(
+                            listOfNotNull(stateLabel, sleepAt?.let { sleepRemainLabel(it, now) })
+                                .joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isOn) MaterialTheme.colorScheme.primary else onContainer.copy(alpha = 0.7f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
                 IconButton(
@@ -672,3 +679,6 @@ private val IconAlarm = svgIcon(
     "alarm",
     "M22,5.72l-4.6,-3.86 -1.29,1.53 4.6,3.86L22,5.72zM7.88,3.39L6.6,1.86 2,5.71l1.29,1.53 4.59,-3.85zM12.5,8H11v6l4.75,2.85 0.75,-1.23 -4,-2.37V8zM12,4c-4.97,0 -9,4.03 -9,9s4.02,9 9,9c4.97,0 9,-4.03 9,-9s-4.03,-9 -9,-9zM12,20c-3.87,0 -7,-3.13 -7,-7s3.13,-7 7,-7 7,3.13 7,7 -3.13,7 -7,7z"
 )
+
+/** 재생 중 표시 점 색 (밝은·어두운 화면 모두 잘 보이는 초록) */
+private val PlayingGreen = Color(0xFF2EB85C)

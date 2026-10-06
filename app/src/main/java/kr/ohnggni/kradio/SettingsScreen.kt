@@ -2,7 +2,12 @@ package kr.ohnggni.kradio
 
 import androidx.compose.ui.platform.LocalConfiguration
 import kotlin.math.roundToInt
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -39,8 +44,6 @@ fun SettingsScreen(
     textScale: Int,
     onSaveTextScale: (Int) -> Unit,
     onSaveStartup: (String, String?) -> Unit,
-    scheduleSummary: String,
-    onOpenSchedules: () -> Unit,
 ) {
     var editConfig by remember { mutableStateOf(false) }
     var editEpg by remember { mutableStateOf(false) }
@@ -69,7 +72,7 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp)
         ) {
-            SectionTitle("채널")
+            SectionTitle("채널", IconSecChannel, first = true)
             SettingRow(
                 title = "채널 관리",
                 value = "순서 변경 · 숨기기 · 추가 · 수정",
@@ -86,22 +89,16 @@ fun SettingsScreen(
                 },
                 onClick = { editStartup = true }
             )
-            SettingRow(
-                title = "켜짐 예약",
-                value = scheduleSummary,
-                onClick = onOpenSchedules
-            )
 
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-            SectionTitle("화면")
+            SectionTitle("화면", IconSecDisplay)
             SettingRow(
                 title = "글자 크기",
                 value = TextScale.label(textScale),
                 onClick = { editTextScale = true }
             )
 
-            SectionTitle("데이터 출처")
+            SectionTitle("데이터 출처", IconSecData)
             SettingRow(
                 title = "채널 설정",
                 value = customConfig ?: "KRadio 기본 제공",
@@ -132,8 +129,7 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            SectionTitle("앱 정보")
+            SectionTitle("앱 정보", IconSecInfo)
             SettingRow(
                 title = "버전",
                 value = newVersion?.let { "$appVersion · 새 버전 $it 있음" } ?: appVersion,
@@ -188,15 +184,41 @@ fun SettingsScreen(
     }
 }
 
+/** 구역 제목: 연한 동그라미 안의 단색 아이콘 + 굵은 제목 (구분선 대신 위쪽 여백) */
 @Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
-    )
+private fun SectionTitle(text: String, icon: ImageVector, first: Boolean = false) {
+    Row(
+        Modifier.padding(start = 16.dp, end = 16.dp, top = if (first) 8.dp else 24.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
 }
+
+// 구역 아이콘 (단색)
+private val IconSecChannel = svgIcon("sec_channel",
+    "M3.24,6.15C2.51,6.43 2,7.17 2,8v12c0,1.1 0.89,2 2,2h16c1.11,0 2,-0.9 2,-2V8c0,-1.11 -0.89,-2 -2,-2H8.3l8.26,-3.34L15.88,1 3.24,6.15zM7,20c-1.66,0 -3,-1.34 -3,-3s1.34,-3 3,-3 3,1.34 3,3 -1.34,3 -3,3zM20,12h-2v-2h-2v2H4V8h16v4z")
+private val IconSecDisplay = svgIcon("sec_display",
+    "M9,4v3h5v12h3V7h5V4H9zM3,12h3v7h3v-7h3V9H3V12z")
+private val IconSecData = svgIcon("sec_data",
+    "M19.35,10.04C18.67,6.59 15.64,4 12,4 9.11,4 6.6,5.64 5.35,8.04 2.34,8.36 0,10.91 0,14c0,3.31 2.69,6 6,6h13c2.76,0 5,-2.24 5,-5 0,-2.64 -2.05,-4.78 -4.65,-4.96z")
+private val IconSecInfo = svgIcon("sec_info",
+    "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM13,17h-2v-6h2v6zM13,9h-2V7h2v2z")
 
 @Composable
 private fun SettingRow(
