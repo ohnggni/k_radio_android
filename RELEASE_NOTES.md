@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.8.0 (Unreleased)
+## 1.8.0 (2026-10-06)
 
 ### Improved
 - Channel logos show again in apps that display what is playing, such as floating music players and Android-based car head units. The logo of the playing channel is now sent as image data instead of a link those apps could not open.
