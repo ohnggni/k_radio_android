@@ -109,7 +109,6 @@ class MainActivity : ComponentActivity() {
         if (key == CarLink.KEY) carMode = CarLink.isConnected(this)   // 재생 서비스가 저장한 오토 연결 상태
     }
 
-    private var scheduleBack = Screen.SETTINGS   // 켜짐 예약 화면에서 뒤로 갈 곳
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -168,7 +167,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = screen != Screen.MAIN) {
                     screen = when (screen) {
                         Screen.SETTINGS -> Screen.MAIN
-                        Screen.SCHEDULE -> scheduleBack
+                        Screen.SCHEDULE -> Screen.MAIN
                         else -> Screen.SETTINGS
                     }
                 }
@@ -213,10 +212,7 @@ class MainActivity : ComponentActivity() {
                             onToggleMute = { toggleMute() },
                             carMode = carMode,
                             hasSchedules = schedules.any { it.enabled },
-                            onOpenSchedules = {
-                                scheduleBack = Screen.MAIN
-                                screen = Screen.SCHEDULE
-                            },
+                            onOpenSchedules = { screen = Screen.SCHEDULE },
                         )
                         if (showSleep) {
                             SleepTimerDialog(
@@ -265,12 +261,6 @@ class MainActivity : ComponentActivity() {
                             startupMode = mode
                             startupChannel = id
                         },
-                        scheduleSummary = schedules.count { it.enabled }
-                            .let { if (it == 0) "없음" else "${it}개 켜짐" },
-                        onOpenSchedules = {
-                            scheduleBack = Screen.SETTINGS
-                            screen = Screen.SCHEDULE
-                        },
                     )
 
                     Screen.MANAGE -> ChannelManageScreen(
@@ -302,7 +292,7 @@ class MainActivity : ComponentActivity() {
                         schedules = schedules,
                         channels = channels,
                         epg = epg,
-                        onBack = { screen = scheduleBack },
+                        onBack = { screen = Screen.MAIN },
                         onSave = { saveSchedule(it) },
                         onDelete = { deleteSchedule(it) },
                     )

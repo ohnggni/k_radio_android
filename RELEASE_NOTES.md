@@ -4,6 +4,26 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.8.0 (Unreleased)
+
+### Improved
+- Channel logos show again in apps that display what is playing, such as floating music players and Android-based car head units. The logo of the playing channel is now sent as image data instead of a link those apps could not open.
+- Android Auto: the now playing background changes only once when switching channels.
+- Logos of channels added to the channel settings later (not bundled in the app) are now shown in Android Auto and on Galaxy Watch.
+- Settings: section headings with icons; scheduled start removed from Settings (open it from the top banner).
+- Player: the playing status uses a small green dot.
+
+### Changed
+- The channel settings file moved to a separate location. Older app versions keep working with the previous location.
+
+### Technical
+- Channel settings (`channels.json`) and the data format guide moved to the `config` branch; the copy at the main branch root is kept in sync for older versions.
+- `scripts/config.sh` for editing channel settings; `release.sh` updates the latest version in the `config` branch and copies it to main.
+- Now playing metadata sent outside the app carries artwork data only; playlist items keep content URIs.
+- Media3 deprecations removed (connection result builder, playback resumption callback).
+
+---
+
 ## 1.7.2 (2026-10-04)
 
 ### Fixed

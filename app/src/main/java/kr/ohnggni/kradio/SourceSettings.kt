@@ -6,7 +6,7 @@ import org.json.JSONObject
 /** 데이터 출처 설정 (기본값은 화면에 주소를 노출하지 않음) */
 object SourceSettings {
     internal const val DEFAULT_CONFIG_URL =
-        "https://raw.githubusercontent.com/ohnggni/k_radio_android/main/channels.json"
+        "https://raw.githubusercontent.com/ohnggni/k_radio_android/config/channels.json"
     internal const val DEFAULT_EPG_URL =
         "https://raw.githubusercontent.com/ohnggni/k_radio_android/epg/xmltv.xml"
 
