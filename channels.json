@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "latestVersionCode": 18,
-  "latestVersionName": "1.8.0",
+  "latestVersionCode": 19,
+  "latestVersionName": "1.9.0",
   "legacyNameSuffix": "(10월 말까지 꼭 업데이트)",
   "epgUrl": "https://raw.githubusercontent.com/ohnggni/k_radio_android/epg/xmltv.xml",
   "logoBase": "https://raw.githubusercontent.com/ohnggni/k_radio/main/static/images/",
