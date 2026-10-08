@@ -34,7 +34,7 @@ case "${1:-}" in
     git -C "$CFG" push -q
     echo "   config 브랜치 푸시"
     # 옛 버전 앱은 main 루트를 봄 → 같은 내용으로 복사 (main의 다른 수정은 건드리지 않음)
-    cp "$CFG/channels.json" "$ROOT/channels.json"
+    python3 "$ROOT/scripts/mirror.py" "$CFG/channels.json" "$ROOT/channels.json"
     if ! git -C "$ROOT" diff --quiet -- channels.json; then
       git -C "$ROOT" commit -qm "Mirror config: $MSG" -- channels.json
       git -C "$ROOT" push -q

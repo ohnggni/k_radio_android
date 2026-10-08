@@ -85,7 +85,7 @@ PYEOF
 python3 -m json.tool "$CFG/channels.json" > /dev/null || { echo "   channels.json 문법 오류"; exit 1; }
 git -C "$CFG" commit -qam "Release $VER: latest version"
 git -C "$CFG" push -q
-cp "$CFG/channels.json" channels.json   # 옛 버전 앱용 복사본 (6단계에서 같이 커밋)
+python3 scripts/mirror.py "$CFG/channels.json" channels.json   # 옛 버전 앱용 복사본 (6단계에서 같이 커밋)
 echo "   config 브랜치 푸시, main 복사본 갱신"
 
 echo "▶ 6. 커밋·태그·푸시"
