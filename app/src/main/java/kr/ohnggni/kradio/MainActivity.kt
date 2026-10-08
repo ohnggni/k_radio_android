@@ -78,6 +78,8 @@ class MainActivity : ComponentActivity() {
 
     private var appVolume by mutableIntStateOf(100)
     private var textScale by mutableIntStateOf(TextScale.FOLLOW)   // 앱 안 글자 크기
+    private var downIds by mutableStateOf<Set<String>>(emptySet())  // 서버 점검에서 문제 있는 채널
+    private var channelTab by mutableIntStateOf(ChannelTab.LIST)     // 메인 화면 채널 탭
 
     private var volumeSync by mutableStateOf(false)
 
@@ -131,6 +133,8 @@ class MainActivity : ComponentActivity() {
         customConfig = SourceSettings.customConfigUrl(this)
         customEpg = SourceSettings.customEpgUrl(this)
 
+        downIds = StreamStatus.cached(this)
+        channelTab = ChannelTab.get(this)
         lifecycleScope.launch {
             prefs = ChannelPrefs.read(this@MainActivity)
             try {
@@ -148,7 +152,10 @@ class MainActivity : ComponentActivity() {
 
             // 화면이 보이는 동안 매 분 정각마다 편성 정보 갱신
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                var tick = 0
                 while (true) {
+                    // 방송 점검 결과: 앞으로 나올 때 바로, 보고 있는 동안 5분마다
+                    if (tick++ % 5 == 0) launch { downIds = StreamStatus.refresh(this@MainActivity) }
                     runCatching {
                         EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity))
                     }.getOrNull()?.let { epg = it }
@@ -176,6 +183,10 @@ class MainActivity : ComponentActivity() {
                     Screen.MAIN -> {
                         MainScreen(
                             channels = channels,
+                            downIds = downIds,
+                            favorites = prefs.favorites,
+                            tab = channelTab,
+                            onTab = { channelTab = it; ChannelTab.set(this, it) },
                             epg = epg,
                             now = now,
                             currentId = currentId,
@@ -366,6 +377,7 @@ class MainActivity : ComponentActivity() {
     private fun reloadSources() {
         lifecycleScope.launch {
             reloading = true
+            downIds = StreamStatus.refresh(this@MainActivity)
             runCatching { ChannelRepository.load(this@MainActivity) }
                 .onSuccess {
                     base = it
