@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.9.0 (Unreleased)
+## 1.9.0 (2026-10-08)
 
 ### New
 - Main screen: favorite channels are shown as a row of tiles at the top, and all channels can be shown as a list or as tiles (the choice is remembered). Favorites are marked with a small star on the logo.
