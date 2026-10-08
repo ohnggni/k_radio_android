@@ -4,6 +4,22 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.9.0 (Unreleased)
+
+### New
+- Main screen: favorite channels are shown as a row of tiles at the top, and all channels can be shown as a list or as tiles (the choice is remembered). Favorites are marked with a small star on the logo.
+- Stream check: channel streams are checked automatically every day. A channel with a playback problem is dimmed and marked "점검 중" (under check) in the app and in Android Auto. It can still be played, and the mark is removed once the stream works again.
+
+### Improved
+- Top banner: new KRadio logo text (same look on every phone), with sound bars that move while playing.
+
+### Technical
+- Stream health check runs on the server (ffmpeg decodes a few seconds of each stream and checks for silence); results are published to `status.json` on the `status` branch only when the set of problem channels changes. The app reads it through the GitHub contents API (raw fallback) on start, on return to the app and every 5 minutes while open.
+- Logo font: Poppins ExtraBold (SIL Open Font License 1.1) bundled for the banner only.
+- `scripts/mirror.py` builds the main-root copy of the channel settings for older versions; an optional `legacyNameSuffix` is appended to the latest version name in that copy only.
+
+---
+
 ## 1.8.0 (2026-10-06)
 
 ### Improved
