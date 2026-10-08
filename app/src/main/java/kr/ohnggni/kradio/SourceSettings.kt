@@ -187,3 +187,14 @@ object TextScale {
         else -> "$v%"
     }
 }
+
+/** 메인 화면 전체 채널 보기 방식 (목록 / 타일), 마지막 선택 기억 */
+object ChannelTab {
+    const val KEY = "channel_tab"
+    const val LIST = 1
+    const val GRID = 2
+
+    private fun sp(c: Context) = c.getSharedPreferences(ChannelPrefs.PREFS, Context.MODE_PRIVATE)
+    fun get(c: Context): Int = if (sp(c).getInt(KEY, LIST) == GRID) GRID else LIST
+    fun set(c: Context, v: Int) = sp(c).edit().putInt(KEY, v).apply()
+}

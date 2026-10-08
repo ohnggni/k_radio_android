@@ -974,7 +974,10 @@ class PlaybackService : MediaLibraryService() {
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(ch.name)
-                    .setArtist(epg?.display(ch.epg)?.let { programLabel(it) } ?: ch.group)
+                    .setArtist(
+                        if (ch.id in StreamStatus.cached(this)) "점검 중"
+                        else epg?.display(ch.epg)?.let { programLabel(it) } ?: ch.group
+                    )
                     .setIsBrowsable(false)
                     .setIsPlayable(true)
                     .setArtworkUri(logoUri(ch))

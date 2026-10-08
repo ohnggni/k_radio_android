@@ -22,8 +22,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.border
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.systemGestureExclusion
@@ -46,6 +56,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -61,6 +72,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.offset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -77,6 +107,10 @@ import kotlin.math.roundToInt
 @Composable
 fun MainScreen(
     channels: List<Channel>,
+    downIds: Set<String>,   // 서버 점검에서 문제 있는 채널 (회색 + 점검 중, 재생은 가능)
+    favorites: List<String>,
+    tab: Int,               // 전체 채널 보기: ChannelTab.LIST / GRID
+    onTab: (Int) -> Unit,
     epg: EpgData?,
     now: Long,
     currentId: String?,
@@ -148,17 +182,115 @@ fun MainScreen(
             )
         }
     ) { inner ->
-        LazyColumn(Modifier.fillMaxSize().padding(inner)) {
-            items(channels, key = { it.id }) { ch ->
-                ChannelRow(
-                    ch = ch,
-                    program = epg?.display(ch.epg, now),
-                    selected = ch.id == currentId,
-                    enabled = enabled,
-                    onClick = { onChannelClick(ch) },
-                )
+        val grid = tab == ChannelTab.GRID
+        // 즐겨찾기: 위젯·오토와 같은 기준 (채널 관리 순서, 숨긴 채널 제외)
+        val favs = channels.filter { it.id in favorites }
+        BoxWithConstraints(Modifier.fillMaxSize().padding(inner)) {
+            // 타일: 한 줄에 최소 4개, 넓은 화면이면 더 많이. 즐겨찾기도 같은 크기
+            val usable = maxWidth - TILE_EDGE * 2
+            val cols = maxOf(4, ((usable + TILE_GAP) / (TILE_MIN + TILE_GAP)).toInt())
+            val tileW = (usable - TILE_GAP * (cols - 1)) / cols
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(if (grid) cols else 1),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = if (grid) TILE_EDGE else 0.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(TILE_GAP),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                val full: (LazyGridItemSpanScope) -> GridItemSpan = { GridItemSpan(it.maxLineSpan) }
+                if (favs.isNotEmpty()) {
+                    item(key = "@favhead", span = full) {
+                        SectionHead("즐겨찾기", rememberVectorPainter(IconStar), FavStar, grid)
+                    }
+                    item(key = "@favs", span = full) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = if (grid) 0.dp else TILE_EDGE, vertical = TILE_VGAP / 2),
+                            horizontalArrangement = Arrangement.spacedBy(TILE_GAP)
+                        ) {
+                            favs.forEach { ch ->
+                                ChannelTile(
+                                    ch = ch,
+                                    program = epg?.display(ch.epg, now),
+                                    selected = ch.id == currentId,
+                                    down = ch.id in downIds,
+                                    favorite = true,
+                                    enabled = enabled,
+                                    onClick = { onChannelClick(ch) },
+                                    modifier = Modifier.width(tileW)
+                                )
+                            }
+                        }
+                    }
+                }
+                // "전체 채널" + 목록/타일 전환
+                item(key = "@head", span = full) {
+                    SectionHead("전체 채널", rememberVectorPainter(IconRadio), null, grid) {
+                        ViewToggle(grid) { onTab(if (grid) ChannelTab.LIST else ChannelTab.GRID) }
+                    }
+                }
+                items(channels, key = { it.id }) { ch ->
+                    if (grid) {
+                        ChannelTile(
+                            ch = ch,
+                            program = epg?.display(ch.epg, now),
+                            selected = ch.id == currentId,
+                            down = ch.id in downIds,
+                            favorite = ch.id in favorites,
+                            enabled = enabled,
+                            onClick = { onChannelClick(ch) },
+                            modifier = Modifier.padding(vertical = TILE_VGAP / 2),
+                        )
+                    } else {
+                        ChannelRow(
+                            ch = ch,
+                            program = epg?.display(ch.epg, now),
+                            selected = ch.id == currentId,
+                            down = ch.id in downIds,
+                            favorite = ch.id in favorites,
+                            enabled = enabled,
+                            onClick = { onChannelClick(ch) },
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+private val TILE_MIN = 76.dp    // 타일 최소 폭
+private val TILE_GAP = 8.dp     // 타일 사이
+private val TILE_EDGE = 12.dp   // 화면 양옆 여백 (타일형)
+private val TILE_VGAP = 10.dp   // 타일 줄 사이
+private val CONTENT_X = 16.dp   // 제목 아이콘·로고가 시작하는 위치 (목록/타일 공통)
+private val FavStar = Color(0xFFFFB300)
+
+/** 구역 제목 줄: 아이콘 + 제목 (+ 오른쪽 버튼). tint = null이면 제목과 같은 색 */
+@Composable
+private fun SectionHead(
+    text: String,
+    icon: Painter,
+    tint: Color?,
+    grid: Boolean,
+    end: @Composable () -> Unit = {},
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 40.dp)
+            .padding(start = CONTENT_X - (if (grid) TILE_EDGE else 0.dp), end = if (grid) 0.dp else TILE_EDGE, top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        end()
     }
 }
 
@@ -224,19 +356,30 @@ private fun TopBanner(
                 .padding(start = 20.dp, end = 10.dp, top = 12.dp, bottom = 12.dp)
         ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                IconRadio,
-                contentDescription = null,
-                tint = cs.primary,
-                modifier = Modifier.size(28.dp)
-            )
-            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    "KRadio",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = cs.onPrimaryContainer
-                )
+                // 로고 글자: 아주 굵게, K·Radio (가운데 점은 흐리게) + 소리 막대 (재생 중일 때만 움직임)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        buildAnnotatedString {
+                            append("K")
+                            withStyle(SpanStyle(color = cs.onPrimaryContainer.copy(alpha = 0.45f))) {
+                                append("\u2009·\u2009")
+                            }
+                            append("Radio")
+                        },
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontFamily = LogoFont,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 24.sp,
+                            lineHeight = 28.sp,
+                            letterSpacing = (-0.5).sp
+                        ),
+                        color = cs.onPrimaryContainer,
+                        maxLines = 1
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    SoundBars(isOn, cs.primary)
+                }
                 Text(
                     dateFmt.format(Date(now)),
                     style = MaterialTheme.typography.labelMedium,
@@ -254,6 +397,39 @@ private fun TopBanner(
     }
 }
 
+/** 로고 글자 전용 폰트 (Poppins ExtraBold, OFL) — 폰마다 글꼴이 달라도 로고는 똑같이 */
+private val LogoFont = FontFamily(Font(R.font.poppins_extrabold, FontWeight.ExtraBold))
+/** 로고 옆 소리 막대 4개: 재생 중이면 출렁이고, 멈추면 낮게 정지 */
+@Composable
+private fun SoundBars(playing: Boolean, color: Color) {
+    val peaks = listOf(0.45f, 0.9f, 0.65f, 1f)
+    val levels: List<Float> = if (playing) {
+        val t = rememberInfiniteTransition(label = "bars")
+        listOf(520, 380, 450, 600).mapIndexed { i, ms ->
+            t.animateFloat(
+                initialValue = 0.25f,
+                targetValue = peaks[i],
+                animationSpec = infiniteRepeatable(tween(ms, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                label = "bar$i"
+            ).value
+        }
+    } else {
+        List(4) { 0.22f }
+    }
+    Canvas(Modifier.size(width = 18.dp, height = 16.dp)) {
+        val w = 3.dp.toPx()
+        val gap = (size.width - w * 4) / 3
+        levels.forEachIndexed { i, l ->
+            val h = size.height * l
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(i * (w + gap), size.height - h),
+                size = Size(w, h),
+                cornerRadius = CornerRadius(w / 2)
+            )
+        }
+    }
+}
 /** 상단 배너 버튼: 반투명 바탕의 둥근 칸에 아이콘과 이름. active면 강조색, 비활성은 흐리게 */
 @Composable
 private fun BannerButton(
@@ -289,14 +465,85 @@ private fun BannerButton(
         )
     }
 }
+/** 목록 ↔ 타일 전환: 바꿀 모양의 아이콘 + 이름 */
+@Composable
+private fun ViewToggle(grid: Boolean, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painterResource(if (grid) R.drawable.ic_tab_list else R.drawable.ic_tab_grid),
+            contentDescription = null,
+            tint = cs.primary,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            if (grid) "목록으로" else "타일로",
+            style = MaterialTheme.typography.labelLarge,
+            color = cs.primary
+        )
+    }
+}
+
+/** 타일 한 칸: 로고 + 채널명 + 지금 방송 */
+@Composable
+private fun ChannelTile(
+    ch: Channel,
+    program: Program?,
+    selected: Boolean,
+    down: Boolean,
+    favorite: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) cs.secondaryContainer else Color.Transparent)
+            .border(2.dp, if (selected) cs.primary else Color.Transparent, RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(4.dp)
+            .alpha(if (down) 0.45f else 1f),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        FavLogo(ch, favorite, selected, 14.dp, Modifier.fillMaxWidth().aspectRatio(1f))
+        Spacer(Modifier.height(4.dp))
+        Text(
+            ch.name,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            if (down) "점검 중" else program?.label() ?: " ",
+            style = MaterialTheme.typography.labelSmall,
+            color = cs.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
 @Composable
 private fun ChannelRow(
     ch: Channel,
     program: Program?,
     selected: Boolean,
+    down: Boolean,
+    favorite: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
+    val dim = if (down) 0.45f else 1f
     Row(
         Modifier
             .fillMaxWidth()
@@ -318,9 +565,9 @@ private fun ChannelRow(
                 .padding(start = 12.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ChannelLogo(ch.logo, ch.name, Modifier.size(48.dp))
+            FavLogo(ch, favorite, selected, 13.dp, Modifier.size(48.dp).alpha(dim))
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).alpha(dim)) {
                 Text(
                     ch.name,
                     style = MaterialTheme.typography.titleMedium,
@@ -328,14 +575,27 @@ private fun ChannelRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    program?.label() ?: "편성 정보 없음",
+                    if (down) "방송 연결 문제를 확인하고 있어요" else program?.label() ?: "편성 정보 없음",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            if (program != null) {
+            if (down) {
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        "점검 중",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            } else if (program != null) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     program.timeRange(),
@@ -680,5 +940,27 @@ private val IconAlarm = svgIcon(
     "M22,5.72l-4.6,-3.86 -1.29,1.53 4.6,3.86L22,5.72zM7.88,3.39L6.6,1.86 2,5.71l1.29,1.53 4.59,-3.85zM12.5,8H11v6l4.75,2.85 0.75,-1.23 -4,-2.37V8zM12,4c-4.97,0 -9,4.03 -9,9s4.02,9 9,9c4.97,0 9,-4.03 9,-9s-4.03,-9 -9,-9zM12,20c-3.87,0 -7,-3.13 -7,-7s3.13,-7 7,-7 7,3.13 7,7 -3.13,7 -7,7z"
 )
 
+/** 채널 로고 + 즐겨찾기면 오른쪽 위 모서리에 별 (바탕 없이, 테두리만 뒤 배경색으로 따서 로고와 구분) */
+@Composable
+private fun FavLogo(ch: Channel, favorite: Boolean, selected: Boolean, star: Dp, modifier: Modifier) {
+    val edge = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
+    Box(modifier) {
+        ChannelLogo(ch.logo, ch.name, Modifier.fillMaxSize())
+        if (favorite) {
+            Box(
+                Modifier.align(Alignment.TopEnd).offset(x = star / 3, y = -star / 3),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(IconStar, contentDescription = null, tint = edge, modifier = Modifier.size(star + 5.dp))
+                Icon(IconStar, contentDescription = "즐겨찾기", tint = FavStar, modifier = Modifier.size(star))
+            }
+        }
+    }
+}
 /** 재생 중 표시 점 색 (밝은·어두운 화면 모두 잘 보이는 초록) */
 private val PlayingGreen = Color(0xFF2EB85C)
+
+private val IconStar = svgIcon(
+    "star",
+    "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z"
+)
