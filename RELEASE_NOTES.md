@@ -4,6 +4,13 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.9.1 (Unreleased)
+
+### Improved
+- Favorite star: moved to the bottom-right corner of the logo as a small badge on a round cutout, so it no longer looks stuck on the logo's top edge.
+
+---
+
 ## 1.9.0 (2026-10-08)
 
 ### New

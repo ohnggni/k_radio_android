@@ -940,7 +940,7 @@ private val IconAlarm = svgIcon(
     "M22,5.72l-4.6,-3.86 -1.29,1.53 4.6,3.86L22,5.72zM7.88,3.39L6.6,1.86 2,5.71l1.29,1.53 4.59,-3.85zM12.5,8H11v6l4.75,2.85 0.75,-1.23 -4,-2.37V8zM12,4c-4.97,0 -9,4.03 -9,9s4.02,9 9,9c4.97,0 9,-4.03 9,-9s-4.03,-9 -9,-9zM12,20c-3.87,0 -7,-3.13 -7,-7s3.13,-7 7,-7 7,3.13 7,7 -3.13,7 -7,7z"
 )
 
-/** 채널 로고 + 즐겨찾기면 오른쪽 위 모서리에 별 (바탕 없이, 테두리만 뒤 배경색으로 따서 로고와 구분) */
+/** 채널 로고 + 즐겨찾기면 오른쪽 아래 모서리에 걸친 별 (뒤 배경색 동그라미로 따서 배지처럼 구분) */
 @Composable
 private fun FavLogo(ch: Channel, favorite: Boolean, selected: Boolean, star: Dp, modifier: Modifier) {
     val edge = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
@@ -948,10 +948,13 @@ private fun FavLogo(ch: Channel, favorite: Boolean, selected: Boolean, star: Dp,
         ChannelLogo(ch.logo, ch.name, Modifier.fillMaxSize())
         if (favorite) {
             Box(
-                Modifier.align(Alignment.TopEnd).offset(x = star / 3, y = -star / 3),
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 3.dp, y = 3.dp)
+                    .size(star + 8.dp)
+                    .background(edge, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(IconStar, contentDescription = null, tint = edge, modifier = Modifier.size(star + 5.dp))
                 Icon(IconStar, contentDescription = "즐겨찾기", tint = FavStar, modifier = Modifier.size(star))
             }
         }
