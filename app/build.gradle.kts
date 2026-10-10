@@ -21,8 +21,8 @@ android {
         applicationId = "kr.ohnggni.kradio"
         minSdk = 26
         targetSdk = 36   // 안드로이드 17 백그라운드 오디오 '사용 중' 권한 요구 회피 (컴파일은 37 유지)
-        versionCode = 19
-        versionName = "1.9.0"
+        versionCode = 20
+        versionName = "1.9.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
