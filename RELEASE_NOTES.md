@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.10.0 (Unreleased)
+## 1.10.0 (2026-10-16)
 
 ### New
 - Theme (Settings → Display → Theme): follow the phone (default), light, dark, dark from sunset to sunrise (Seoul times, calculated for each date), or dark between custom times (default 19:00–07:00). Applies to the app and the home screen widget.
