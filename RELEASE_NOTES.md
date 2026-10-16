@@ -4,6 +4,26 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.10.0 (Unreleased)
+
+### New
+- Theme (Settings → Display → Theme): follow the phone (default), light, dark, dark from sunset to sunrise (Seoul times, calculated for each date), or dark between custom times (default 19:00–07:00). Applies to the app and the home screen widget.
+  - Light, dark and the time-based options also fix the widget colors, for devices whose home screen does not switch the widget to dark mode (such as some in-car all-in-one units).
+
+### Improved
+- Main screen: the separate favorites row is removed. Favorite channels (up to 3) are shown first in the channel list or tiles, marked with the star, followed by the other channels in the channel order. Previous/next channel order is unchanged.
+
+### Fixed
+- Widget: logos of channels added by the user (or added to the channel settings later) were not shown.
+
+### Technical
+- `ThemeSchedule.kt`: `ThemeMode` (moved from `SourceSettings.kt`) with the sunrise/sunset calculation (NOAA approximation for Seoul, about 1–2 minutes) and `ThemeAlarm`, which redraws the widget at the next light/dark change (exact alarm when allowed, as for scheduled start) and is set again on boot, time change, app update and app start.
+- The widget state stores the resolved mode (follow / light / dark); fixed modes use `glance-material3` `ColorProviders` with the same scheme for day and night. The app also refreshes the widget when its own theme flips.
+- The status and navigation bar icon colors follow the app theme.
+- The playback service passes the effective logo (logoBase or internet address when not bundled) to the widget; the widget reads it from the same cache as Android Auto and Galaxy Watch and downloads it in the background if missing.
+
+---
+
 ## 1.9.1 (2026-10-10)
 
 ### Improved

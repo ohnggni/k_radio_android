@@ -1,5 +1,8 @@
 package kr.ohnggni.kradio
 
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -87,14 +90,29 @@ class ScheduleReceiver : BroadcastReceiver() {
                 val pending = goAsync()                  // 재생 요청이 끝날 때까지 잠시 유지
                 ScheduleStarter.start(context.applicationContext, s) { pending.finish() }
             }
+            ThemeAlarm.ACTION -> refreshTheme(context)
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIME_CHANGED,
-            Intent.ACTION_TIMEZONE_CHANGED -> ScheduleAlarms.rescheduleAll(context)
+            Intent.ACTION_TIMEZONE_CHANGED -> {
+                ScheduleAlarms.rescheduleAll(context)
+                refreshTheme(context)
+            }
         }
     }
 }
 /** 백그라운드에서 채널 하나 틀기 (켜짐 예약·위젯 즐겨찾기 공용) */
+/** 위젯 밝기를 지금 시각 기준으로 다시 그리고 다음 전환 알람 등록 */
+private fun BroadcastReceiver.refreshTheme(context: Context) {
+    val pending = goAsync()
+    val app = context.applicationContext
+    CoroutineScope(Dispatchers.Default).launch {
+        runCatching { WidgetUpdater.push(app) }
+        ThemeAlarm.schedule(app)
+        pending.finish()
+    }
+}
+
 object ScheduleStarter {
 
     /** 켜짐 예약: 예약 음량으로 맞추고 서서히 커지며 시작 */

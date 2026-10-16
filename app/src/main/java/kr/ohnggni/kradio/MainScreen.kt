@@ -183,13 +183,12 @@ fun MainScreen(
         }
     ) { inner ->
         val grid = tab == ChannelTab.GRID
-        // 즐겨찾기: 위젯·오토와 같은 기준 (채널 관리 순서, 숨긴 채널 제외)
-        val favs = channels.filter { it.id in favorites }
+        // 즐겨찾기(최대 3개)를 맨 앞에 고정하고 나머지는 채널 관리 순서. 화면 표시만 바꾸고 이전·다음 채널 순서는 그대로
+        val shown = channels.filter { it.id in favorites } + channels.filter { it.id !in favorites }
         BoxWithConstraints(Modifier.fillMaxSize().padding(inner)) {
-            // 타일: 한 줄에 최소 4개, 넓은 화면이면 더 많이. 즐겨찾기도 같은 크기
+            // 타일: 한 줄에 최소 4개, 넓은 화면이면 더 많이
             val usable = maxWidth - TILE_EDGE * 2
             val cols = maxOf(4, ((usable + TILE_GAP) / (TILE_MIN + TILE_GAP)).toInt())
-            val tileW = (usable - TILE_GAP * (cols - 1)) / cols
             LazyVerticalGrid(
                 columns = GridCells.Fixed(if (grid) cols else 1),
                 modifier = Modifier.fillMaxSize(),
@@ -198,37 +197,13 @@ fun MainScreen(
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
                 val full: (LazyGridItemSpanScope) -> GridItemSpan = { GridItemSpan(it.maxLineSpan) }
-                if (favs.isNotEmpty()) {
-                    item(key = "@favhead", span = full) {
-                        SectionHead("즐겨찾기", rememberVectorPainter(IconStar), FavStar, grid)
-                    }
-                    item(key = "@favs", span = full) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = if (grid) 0.dp else TILE_EDGE, vertical = TILE_VGAP / 2),
-                            horizontalArrangement = Arrangement.spacedBy(TILE_GAP)
-                        ) {
-                            favs.forEach { ch ->
-                                ChannelTile(
-                                    ch = ch,
-                                    program = epg?.display(ch.epg, now),
-                                    selected = ch.id == currentId,
-                                    down = ch.id in downIds,
-                                    favorite = true,
-                                    enabled = enabled,
-                                    onClick = { onChannelClick(ch) },
-                                    modifier = Modifier.width(tileW)
-                                )
-                            }
-                        }
-                    }
-                }
                 // "전체 채널" + 목록/타일 전환
                 item(key = "@head", span = full) {
                     SectionHead("전체 채널", rememberVectorPainter(IconRadio), null, grid) {
                         ViewToggle(grid) { onTab(if (grid) ChannelTab.LIST else ChannelTab.GRID) }
                     }
                 }
-                items(channels, key = { it.id }) { ch ->
+                items(shown, key = { it.id }) { ch ->
                     if (grid) {
                         ChannelTile(
                             ch = ch,

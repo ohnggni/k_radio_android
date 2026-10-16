@@ -1,5 +1,12 @@
 package kr.ohnggni.kradio
 
+import androidx.glance.material3.ColorProviders
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.darkColorScheme
+import android.os.Build
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -129,6 +136,7 @@ object WidgetState {
 object WidgetUpdater {
     val STATE = stringPreferencesKey("state")
     val FAVS = stringPreferencesKey("favs")
+    val THEME = intPreferencesKey("theme")
 
     suspend fun push(c: Context) {
         val ids = GlanceAppWidgetManager(c).getGlanceIds(KRadioWidget::class.java)
@@ -140,6 +148,7 @@ object WidgetUpdater {
             updateAppWidgetState(c, id) { p ->
                 p[STATE] = state
                 p[FAVS] = favs
+                p[THEME] = ThemeMode.widgetMode(c)
             }
             widget.update(c, id)
         }
@@ -340,8 +349,22 @@ class KRadioWidget : GlanceAppWidget() {
             val st = WidgetState.fromJson(prefs[WidgetUpdater.STATE]) ?: fallbackState
             val favs = WidgetUpdater.parseFavs(prefs[WidgetUpdater.FAVS] ?: fallbackFavs)
             val logo = st.logo?.let { loadLogo(context, it) }
-            GlanceTheme {
-                WidgetContent(context, st, logo, favs)
+            val mode = prefs[WidgetUpdater.THEME] ?: ThemeMode.widgetMode(context)
+            if (mode == ThemeMode.FOLLOW) {
+                GlanceTheme {
+                    WidgetContent(context, st, logo, favs)
+                }
+            } else {
+                // 폰·런처의 다크 모드와 상관없이 고정 (낮·밤 모두 같은 색 묶음)
+                val dyn = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                val scheme = if (mode == ThemeMode.DARK) {
+                    if (dyn) dynamicDarkColorScheme(context) else darkColorScheme()
+                } else {
+                    if (dyn) dynamicLightColorScheme(context) else lightColorScheme()
+                }
+                GlanceTheme(colors = ColorProviders(light = scheme, dark = scheme)) {
+                    WidgetContent(context, st, logo, favs)
+                }
             }
         }
     }
@@ -632,9 +655,26 @@ class KRadioWidget : GlanceAppWidget() {
         )
 
     private fun loadLogo(c: Context, logo: String): Bitmap? {
-        if (!logo.startsWith(LogoCache.ASSET_PREFIX)) return null
+        if (logo.startsWith(LogoCache.ASSET_PREFIX)) {
+            return runCatching {
+                c.assets.open(logo.removePrefix(LogoCache.ASSET_PREFIX)).use { BitmapFactory.decodeStream(it) }
+                    ?.let { Bitmap.createScaledBitmap(it, 128, 128, true) }
+            }.getOrNull()
+        }
+        // 직접 추가한 채널·나중에 추가된 채널의 인터넷 로고: 오토·워치와 같은 저장본 사용
+        val bytes = LogoProvider.remoteBytes(c, logo)
+        if (bytes == null) {
+            // 아직 안 받았으면 뒤에서 받아두고, 받으면 위젯을 다시 그림 (실패하면 로고 없이 그대로)
+            val app = c.applicationContext
+            CoroutineScope(Dispatchers.IO).launch {
+                if (runCatching { LogoProvider.prefetch(app, logo) }.getOrDefault(false)) {
+                    runCatching { WidgetUpdater.push(app) }
+                }
+            }
+            return null
+        }
         return runCatching {
-            c.assets.open(logo.removePrefix(LogoCache.ASSET_PREFIX)).use { BitmapFactory.decodeStream(it) }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 ?.let { Bitmap.createScaledBitmap(it, 128, 128, true) }
         }.getOrNull()
     }
