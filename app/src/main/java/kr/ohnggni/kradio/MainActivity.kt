@@ -1,5 +1,8 @@
 package kr.ohnggni.kradio
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.isSystemInDarkTheme
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
@@ -78,6 +81,8 @@ class MainActivity : ComponentActivity() {
 
     private var appVolume by mutableIntStateOf(100)
     private var textScale by mutableIntStateOf(TextScale.FOLLOW)   // 앱 안 글자 크기
+    private var themeMode by mutableIntStateOf(ThemeMode.FOLLOW)   // 폰 설정 따름 / 밝게 / 어둡게 / 일몰~일출 / 시간 지정
+    private var themeRev by mutableIntStateOf(0)                     // 테마 시간 설정이 바뀔 때마다 +1
     private var downIds by mutableStateOf<Set<String>>(emptySet())  // 서버 점검에서 문제 있는 채널
     private var channelTab by mutableIntStateOf(ChannelTab.LIST)     // 메인 화면 채널 탭
 
@@ -108,6 +113,10 @@ class MainActivity : ComponentActivity() {
         if (key == SleepTimer.KEY) sleepAt = SleepTimer.get(this)
         if (key == AppVolume.KEY) appVolume = AppVolume.get(this)   // 위젯에서 바꾼 앱 음량 반영
         if (key == TextScale.KEY) textScale = TextScale.get(this)
+        if (key == ThemeMode.KEY || key == ThemeMode.KEY_FROM || key == ThemeMode.KEY_TO) {
+            themeMode = ThemeMode.get(this)
+            themeRev++
+        }
         if (key == CarLink.KEY) carMode = CarLink.isConnected(this)   // 재생 서비스가 저장한 오토 연결 상태
     }
 
@@ -168,8 +177,19 @@ class MainActivity : ComponentActivity() {
         }
 
         textScale = TextScale.get(this)
+        themeMode = ThemeMode.get(this)
+        ThemeAlarm.schedule(this)   // 위젯 밝기 전환 알람이 빠졌어도 앱을 열면 다시 걸림
         setContent {
-            KRadioTheme {
+            val sysDark = isSystemInDarkTheme()
+            // 매분 갱신되는 now로 일몰~일출·시간 지정 전환 반영
+            val dark = remember(themeMode, themeRev, now, sysDark) {
+                ThemeMode.appDark(this@MainActivity, sysDark, now)
+            }
+            // 앱이 열려 있을 때 밝기가 바뀌면 위젯도 바로 맞춤 (알람을 기다리지 않음)
+            LaunchedEffect(dark) { runCatching { WidgetUpdater.push(this@MainActivity) } }
+            val themeFrom = remember(themeRev) { ThemeMode.darkFrom(this@MainActivity) }
+            val themeTo = remember(themeRev) { ThemeMode.darkTo(this@MainActivity) }
+            KRadioTheme(darkTheme = dark) {
             AppTextScale(textScale) {
                 BackHandler(enabled = screen != Screen.MAIN) {
                     screen = when (screen) {
@@ -267,6 +287,14 @@ class MainActivity : ComponentActivity() {
                         startupChannel = startupChannel,
                         textScale = textScale,
                         onSaveTextScale = { TextScale.set(this, it) },
+                        themeMode = themeMode,
+                        themeFrom = themeFrom,
+                        themeTo = themeTo,
+                        onSaveThemeMode = { mode, from, to ->
+                            ThemeMode.save(this, mode, from, to)
+                            ThemeAlarm.schedule(this)
+                            lifecycleScope.launch { WidgetUpdater.push(this@MainActivity) }   // 위젯 색도 바로 반영
+                        },
                         onSaveStartup = { mode, id ->
                             StartupSettings.save(this, mode, id)
                             startupMode = mode

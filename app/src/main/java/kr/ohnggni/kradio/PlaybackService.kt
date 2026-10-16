@@ -523,7 +523,7 @@ class PlaybackService : MediaLibraryService() {
             name = ch?.name ?: item?.mediaMetadata?.title?.toString() ?: "케이라디오",
             program = item?.mediaMetadata?.artist?.toString().orEmpty(),
             playing = exo.playWhenReady,
-            logo = ch?.logo,
+            logo = ch?.let { effectiveLogo(it) },
             vol = am.getStreamVolume(AudioManager.STREAM_MUSIC),
             volMax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
             car = carConnected,

@@ -43,12 +43,17 @@ fun SettingsScreen(
     startupChannel: String?,
     textScale: Int,
     onSaveTextScale: (Int) -> Unit,
+    themeMode: Int,
+    themeFrom: Int,
+    themeTo: Int,
+    onSaveThemeMode: (Int, Int, Int) -> Unit,
     onSaveStartup: (String, String?) -> Unit,
 ) {
     var editConfig by remember { mutableStateOf(false) }
     var editEpg by remember { mutableStateOf(false) }
     var editStartup by remember { mutableStateOf(false) }
     var editTextScale by remember { mutableStateOf(false) }
+    var editTheme by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -92,6 +97,11 @@ fun SettingsScreen(
 
 
             SectionTitle("화면", IconSecDisplay)
+            SettingRow(
+                title = "테마",
+                value = ThemeMode.label(themeMode, themeFrom, themeTo),
+                onClick = { editTheme = true }
+            )
             SettingRow(
                 title = "글자 크기",
                 value = TextScale.label(textScale),
@@ -164,6 +174,15 @@ fun SettingsScreen(
             guide = "XMLTV 형식(xmltv.xml) 파일 주소를 입력하세요. 비워두면 채널 설정 파일에 지정된 편성표나 기본 제공 편성표를 사용해요.",
             onDismiss = { editEpg = false },
             onSave = { onSaveEpg(it); editEpg = false }
+        )
+    }
+    if (editTheme) {
+        ThemeDialog(
+            current = themeMode,
+            from = themeFrom,
+            to = themeTo,
+            onDismiss = { editTheme = false },
+            onSave = { mode, from, to -> onSaveThemeMode(mode, from, to); editTheme = false }
         )
     }
     if (editTextScale) {
@@ -359,6 +378,56 @@ private fun StartupDialog(
                 enabled = mode != StartupSettings.MODE_FIXED || chId != null,
                 onClick = { onSave(mode, if (mode == StartupSettings.MODE_FIXED) chId else null) }
             ) { Text("저장") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+    )
+}
+
+@Composable
+private fun ThemeDialog(current: Int, from: Int, to: Int, onDismiss: () -> Unit, onSave: (Int, Int, Int) -> Unit) {
+    var sel by remember { mutableStateOf(current) }
+    var fh by remember { mutableStateOf("%02d".format(from / 60)) }
+    var fm by remember { mutableStateOf("%02d".format(from % 60)) }
+    var th by remember { mutableStateOf("%02d".format(to / 60)) }
+    var tm by remember { mutableStateOf("%02d".format(to % 60)) }
+    val sun = remember { ThemeMode.sunLabel() }
+    fun minutes(h: String, m: String) =
+        (h.toIntOrNull()?.coerceIn(0, 23) ?: 0) * 60 + (m.toIntOrNull()?.coerceIn(0, 59) ?: 0)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("테마") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "앱 화면과 위젯에 같이 적용돼요. 폰을 다크 모드로 해도 위젯이 밝게 남는 기기라면 어둡게나 시간 기준을 골라주세요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                ThemeMode.OPTIONS.forEach { v ->
+                    ModeOption(ThemeMode.optionLabel(v), sel == v) { sel = v }
+                    if (v == ThemeMode.SUN && sel == ThemeMode.SUN) {
+                        Text(
+                            "서울 기준 오늘 $sun\n날짜에 따라 자동으로 바뀌어요.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+                        )
+                    }
+                    if (v == ThemeMode.CUSTOM && sel == ThemeMode.CUSTOM) {
+                        Column(Modifier.padding(start = 16.dp, bottom = 4.dp)) {
+                            Text("어둡게 시작", style = MaterialTheme.typography.labelMedium)
+                            TimeStepper(fh, fm) { h, m -> fh = h; fm = m }
+                            Spacer(Modifier.height(4.dp))
+                            Text("밝게 시작", style = MaterialTheme.typography.labelMedium)
+                            TimeStepper(th, tm) { h, m -> th = h; tm = m }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(sel, minutes(fh, fm), minutes(th, tm)) }) { Text("저장") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
     )
