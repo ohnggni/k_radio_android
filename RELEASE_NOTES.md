@@ -4,6 +4,16 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.10.1 (Unreleased)
+
+### Fixed
+- Start playback: after the app had not been used for a long time, opening it from the recent apps list did not play the last (or chosen) channel and stayed on "select a channel". The app now treats this as a fresh start.
+
+### Technical
+- When Android had removed the app process and restored the screen state, `savedInstanceState` was not null, so it was taken for a fold/rotation re-creation and start playback was skipped. A process-wide flag (`activityCreatedInProcess`) now separates the two: only a re-creation within the same process skips start playback.
+
+---
+
 ## 1.10.0 (2026-10-16)
 
 ### New
