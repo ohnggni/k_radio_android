@@ -66,15 +66,10 @@ rclone copy "$APK" "$DRIVE"
 rclone ls "$DRIVE" | grep "KRadio-$VER.apk" > /dev/null || { echo "   업로드 확인 실패"; exit 1; }
 echo "   업로드 확인"
 
-echo "▶ 5. 앱 내 업데이트 알림 켜기 (config 브랜치 → main 루트 복사본)"
-CFG="$(dirname "$ROOT")/KRadio-config"
-if [ ! -e "$CFG/.git" ]; then
-  git worktree prune
-  git fetch -q origin config
-  git worktree add -q "$CFG" config 2>/dev/null || git worktree add -q -B config "$CFG" origin/config
-fi
-git -C "$CFG" pull -q --ff-only
-python3 - "$NEW_CODE" "$VER" "$CFG/channels.json" << 'PYEOF'
+echo "▶ 5. 앱 내 업데이트 알림 켜기 (비공개 원본 → 암호문·옛 버전용 껍데기)"
+PRIV="$(dirname "$ROOT")/kradio-private"
+git -C "$PRIV" pull -q --ff-only
+python3 - "$NEW_CODE" "$VER" "$PRIV/channels.json" << 'PYEOF'
 import re, sys
 code, ver, p = sys.argv[1], sys.argv[2], sys.argv[3]
 s = open(p, encoding="utf-8").read()
@@ -82,11 +77,11 @@ s = re.sub(r'"latestVersionCode":\s*\d+', f'"latestVersionCode": {code}', s)
 s = re.sub(r'"latestVersionName":\s*"[^"]*"', f'"latestVersionName": "{ver}"', s)
 open(p, "w", encoding="utf-8").write(s)
 PYEOF
-python3 -m json.tool "$CFG/channels.json" > /dev/null || { echo "   channels.json 문법 오류"; exit 1; }
-git -C "$CFG" commit -qam "Release $VER: latest version"
-git -C "$CFG" push -q
-python3 scripts/mirror.py "$CFG/channels.json" channels.json   # 옛 버전 앱용 복사본 (6단계에서 같이 커밋)
-echo "   config 브랜치 푸시, main 복사본 갱신"
+python3 -m json.tool "$PRIV/channels.json" > /dev/null || { echo "   channels.json 문법 오류"; exit 1; }
+git -C "$PRIV" commit -qam "Release $VER: latest version"
+git -C "$PRIV" push -q
+"$ROOT/scripts/config.sh" publish   # d 브랜치 암호문, config 브랜치 껍데기, main 루트 껍데기(6단계에서 같이 커밋)
+echo "   비공개 원본 푸시, 암호문·껍데기 갱신"
 
 echo "▶ 6. 커밋·태그·푸시"
 git add "$GRADLE_FILE" RELEASE_NOTES.md "$NOTES_KO" channels.json
