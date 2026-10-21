@@ -5,7 +5,10 @@ import org.json.JSONObject
 
 /** 데이터 출처 설정 (기본값은 화면에 주소를 노출하지 않음) */
 object SourceSettings {
-    internal const val DEFAULT_CONFIG_URL =
+    /** 기본 채널 설정(암호문) 주소: 빌드할 때 비공개 secrets.properties에서 들어옴 */
+    internal val DEFAULT_CONFIG_URL: String get() = BuildConfig.CONFIG_URL
+    /** 1.10.1 이하의 기본 주소. 업데이트 직후 오프라인이면 그때 저장해 둔 설정으로 시작하려고 남겨 둠 */
+    internal const val LEGACY_CONFIG_URL =
         "https://raw.githubusercontent.com/ohnggni/k_radio_android/config/channels.json"
     internal const val DEFAULT_EPG_URL =
         "https://raw.githubusercontent.com/ohnggni/k_radio_android/epg/xmltv.xml"

@@ -64,7 +64,8 @@ object ChannelRepository {
     suspend fun load(context: Context, quiet: Boolean = false): List<Channel> = withContext(Dispatchers.IO) {
         loadLock.withLock {
             val url = SourceSettings.configUrl(context)
-            val cache = File(context.filesDir, "channels_cache_${url.hashCode()}.json")
+            val cache = cacheFile(context, url)
+            val legacy = legacyCache(context, url)
 
             val remote = fetchWithRetry(url)
             val remoteText = remote.getOrNull()?.takeIf { t -> runCatching { parse(t) }.isSuccess }
@@ -83,6 +84,7 @@ object ChannelRepository {
                     remoteText
                 }
                 cache.exists() -> cache.readText()
+                legacy?.exists() == true -> legacy.readText()
                 else -> error("채널 설정을 불러올 수 없음")
             }
             parse(text)
@@ -91,8 +93,24 @@ object ChannelRepository {
     /** 네트워크 없이 저장본만 읽기 (예약 실행처럼 바로 시작해야 할 때) */
     fun loadCached(context: Context): List<Channel>? {
         val url = SourceSettings.configUrl(context)
-        val cache = File(context.filesDir, "channels_cache_${url.hashCode()}.json")
-        return if (cache.exists()) runCatching { parse(cache.readText()) }.getOrNull() else null
+        val file = cacheFile(context, url).takeIf { it.exists() }
+            ?: legacyCache(context, url)?.takeIf { it.exists() }
+        return file?.let { f -> runCatching { parse(f.readText()) }.getOrNull() }
+    }
+
+    /** 받은 그대로(기본 설정은 암호문) 저장하는 파일 */
+    private fun cacheFile(context: Context, url: String) =
+        File(context.filesDir, "channels_cache_${url.hashCode()}.json")
+
+    /** 기본 주소를 쓸 때만: 1.10.1 이하가 옛 주소로 저장해 둔 평문 설정 (새 저장본이 생기면 지움) */
+    private fun legacyCache(context: Context, url: String): File? {
+        if (url != SourceSettings.DEFAULT_CONFIG_URL) return null
+        val f = cacheFile(context, SourceSettings.LEGACY_CONFIG_URL)
+        if (f.exists() && cacheFile(context, url).exists()) {
+            f.delete()
+            return null
+        }
+        return f
     }
 
     /** 일시적인 네트워크 실패 대비: 실패하면 2초 뒤 한 번 더 */
@@ -124,7 +142,7 @@ object ChannelRepository {
     }
 
     private fun parse(text: String): List<Channel> {
-        val root = JSONObject(text)
+        val root = JSONObject(ConfigCrypto.open(text))
         epgUrl = root.optString("epgUrl").ifEmpty { null }
         logoBase = root.optString("logoBase").ifEmpty { null }
         latestVersionCode = root.optLong("latestVersionCode", 0L).takeIf { it > 0 }

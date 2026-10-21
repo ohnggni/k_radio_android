@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+import java.util.Base64
 import java.util.Properties
 
 // 서명 정보는 Git에 올라가지 않는 keystore.properties에서 읽음
@@ -6,6 +8,27 @@ val keystoreProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// 채널 설정 암호화 키·주소는 공개 저장소에 올리지 않음:
+// 프로젝트 옆 비공개 저장소(../kradio-private/secrets.properties) 또는 프로젝트 루트 secrets.properties
+val secretsProps = Properties().apply {
+    val f = listOf(
+        rootProject.file("secrets.properties"),
+        rootProject.file("../kradio-private/secrets.properties"),
+    ).firstOrNull { it.exists() }
+        ?: throw GradleException("secrets.properties 없음: ~/AndroidStudioProjects/kradio-private 를 받아 두세요")
+    f.inputStream().use { load(it) }
+}
+fun secret(name: String): String =
+    secretsProps.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
+        ?: throw GradleException("secrets.properties 에 $name 없음")
+// 키를 그대로 넣지 않고 마스크와 XOR한 두 조각으로 넣음 (문자열 검색으로 바로 안 보이게)
+val configKeyParts: Pair<String, String> = run {
+    val key = Base64.getDecoder().decode(secret("CONFIG_KEY"))
+    require(key.size == 32) { "CONFIG_KEY 는 32바이트여야 함" }
+    val mask = MessageDigest.getInstance("SHA-256").digest(("kr-" + secret("CONFIG_FILE")).toByteArray())
+    val mixed = ByteArray(32) { (key[it].toInt() xor mask[it].toInt()).toByte() }
+    Base64.getEncoder().encodeToString(mask) to Base64.getEncoder().encodeToString(mixed)
+}
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -25,6 +48,9 @@ android {
         versionName = "1.10.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "CONFIG_URL", "\"${secret("CONFIG_URL")}\"")
+        buildConfigField("String", "CK_A", "\"${configKeyParts.first}\"")
+        buildConfigField("String", "CK_B", "\"${configKeyParts.second}\"")
     }
 
     signingConfigs {
@@ -54,6 +80,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

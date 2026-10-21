@@ -63,7 +63,7 @@ fun GuideScreen(onBack: () -> Unit) {
             Bullet("name · group · logo: 이름, 묶음, 로고 (파일 이름만 쓰면 logoBase 뒤에 붙여요)")
             Bullet("type \"direct\": url에 고정 스트림 주소 (m3u8, mp3, aac)")
             Bullet("type \"api\": 재생할 때마다 api 주소를 불러서 extract 규칙(json 경로 또는 regex)으로 주소를 뽑아요. headers에는 headerSets의 이름을 적어요")
-            Bullet("epg: 편성표의 채널 ID (예: 815457.naver)")
+            Bullet("epg: 편성표의 채널 ID (예: 12345.naver)")
             Bullet("epgUrl (파일 맨 위): 편성표 주소")
             CodeBlock("최소 예제 (channels.json)", SAMPLE_MINIMAL, copy)
             CodeBlock("API 채널 예제", SAMPLE_API, copy)
@@ -163,10 +163,10 @@ private val SAMPLE_MINIMAL = """
   "epgUrl": "https://example.com/xmltv.xml",
   "channels": [
     {
-      "id": "ytn",
-      "name": "YTN 라디오",
+      "id": "my_fm",
+      "name": "내 라디오",
       "type": "direct",
-      "epg": "2074615.naver",
+      "epg": "12345.naver",
       "url": "https://radio.example.com/live/playlist.m3u8"
     }
   ]
@@ -175,17 +175,17 @@ private val SAMPLE_MINIMAL = """
 
 private val SAMPLE_API = """
 "headerSets": {
-  "kbs": {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36",
+  "web": {
+    "User-Agent": "Mozilla/5.0",
     "Referer": "https://www.example.com/"
   }
 },
 "channels": [
   {
-    "id": "kbs_cool", "name": "KBS 쿨FM", "group": "KBS",
-    "type": "api", "headers": "kbs", "epg": "815457.naver",
+    "id": "my_api_fm", "name": "API 라디오", "group": "예제",
+    "type": "api", "headers": "web", "epg": "67890.naver",
     "api": "https://api.example.com/live/channel/25",
-    "extract": { "json": "channel_item[media_type=radio].service_url" }
+    "extract": { "json": "items[type=radio].stream_url" }
   }
 ]
 """.trimIndent()
