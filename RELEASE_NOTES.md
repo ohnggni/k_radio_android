@@ -4,6 +4,18 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.11.0 (Unreleased)
+
+### Changed
+- The built-in channel settings are now downloaded from a new location in an encrypted form. Versions 1.10.1 and earlier can no longer load the built-in channels and only show the update notice, so updating is required.
+- Data format guide: the examples now use placeholder addresses.
+
+### Technical
+- The default channel config is encrypted (AES-256-GCM); the key and address are supplied at build time from a file outside the public repository. A custom config address is still read as plain JSON.
+- If the device is offline right after the update, the channel config saved by the previous version is used until the new one has been downloaded once.
+
+---
+
 ## 1.10.1 (2026-10-20)
 
 ### Fixed
