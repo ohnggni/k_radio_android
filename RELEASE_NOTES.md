@@ -4,6 +4,17 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.11.1 (Unreleased)
+
+### Fixed
+- Start playback: after using the app on the unfolded screen and opening it later on the cover screen (or after other display changes while the app was in the background), it stayed on "stopped" instead of playing.
+
+### Technical
+- Start playback was skipped whenever the screen was re-created in the same process. It is now skipped only when the screen was re-created while it was visible (`isChangingConfigurations` at `onStop`), not when it was re-created on return after a display change in the background.
+- Diagnostic log for start playback decisions and recorded stop times: `Android/data/<package>/files/diag.log` (last 200 lines).
+
+---
+
 ## 1.11.0 (2026-10-21)
 
 ### Changed
