@@ -49,6 +49,8 @@ private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE, SCHEDULE, NOTES }
  * 폴드·회전(같은 프로세스)과, 오래 안 써서 정리된 뒤 화면 상태만 복원된 경우를 구분하는 데 씀
  */
 @Volatile private var activityCreatedInProcess = false
+// 마지막으로 화면이 내려갈 때 화면 구성 변경(폴드·회전) 때문이었는지. 그냥 나갈 때는 false
+@Volatile private var stoppedForConfigChange = false
 private const val CONFIG_RECHECK_MS = 15 * 60_000L  // 앱이 앞으로 나올 때 이만큼 지났으면 설정 다시 확인
 class MainActivity : ComponentActivity() {
 
@@ -134,9 +136,13 @@ class MainActivity : ComponentActivity() {
             appVersionCode = PackageInfoCompat.getLongVersionCode(it)
         }
 
-        // 폴드 접기/펴기 등으로 화면만 다시 만들어질 때는 자동 재생하지 않음
-        // 저장된 화면 상태가 있어도 프로세스가 새로 시작됐으면(오래 안 써서 정리됨) 새로 켠 것으로 봄
-        recreated = savedInstanceState != null && activityCreatedInProcess
+        // 보고 있는 중에 폴드 접기/펴기·회전으로 화면만 다시 만들어질 때는 자동 재생하지 않음
+        // - 프로세스가 새로 시작됐으면(오래 안 써서 정리됨) 새로 켠 것으로 봄 (1.10.1)
+        // - 앱을 나가 있는 동안 폴드 상태 등이 바뀌어 돌아올 때 다시 만들어진 것도 새로 켠 것으로 봄 (1.11.1)
+        recreated = savedInstanceState != null && activityCreatedInProcess && stoppedForConfigChange
+        if (savedInstanceState != null) {
+            DiagLog.write(this, "화면 다시 만듦: 같은 프로세스=$activityCreatedInProcess, 보던 중 구성 변경=$stoppedForConfigChange → ${if (recreated) "자동 재생 안 함" else "새로 켠 것으로 봄"}")
+        }
         activityCreatedInProcess = true
         handleShortcut(intent)
         startupMode = StartupSettings.mode(this)
@@ -399,6 +405,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        stoppedForConfigChange = isChangingConfigurations
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controller = null
         getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE)
@@ -657,6 +664,7 @@ class MainActivity : ComponentActivity() {
     private fun tryAutoStart() {
         // 바로가기로 연 경우엔 시작 시 재생 설정보다 바로가기 채널이 우선
         if (pendingShortcutChannel != null) {
+            if (pendingAutoStart) DiagLog.write(this, "자동 재생 건너뜀: 바로가기로 열림")
             pendingAutoStart = false
             return
         }
@@ -664,15 +672,26 @@ class MainActivity : ComponentActivity() {
         val c = controller ?: return
         if (channels.isEmpty()) return
         pendingAutoStart = false
-        if (c.playWhenReady) return   // 재생 중이면 그대로
+        if (c.playWhenReady) {   // 재생 중이면 그대로
+            DiagLog.write(this, "자동 재생 건너뜀: 이미 재생 중")
+            return
+        }
 
         // 재생 서비스가 새로 시작됐거나(목록 없음) 정지한 지 오래됐을 때만 '새로 켠 것'으로 봄
         val stoppedAt = getSharedPreferences(ChannelPrefs.PREFS, MODE_PRIVATE).getLong("stopped_at", 0L)
         val fresh = c.mediaItemCount == 0
         val longIdle = System.currentTimeMillis() - stoppedAt > StartupSettings.AUTO_START_IDLE_MS
-        if (!fresh && !longIdle) return
-
-        val id = StartupSettings.launchChannelId(this, channels) ?: return
+        val why = "서비스 새로 시작=$fresh, 정지 시각=${DiagLog.time(stoppedAt)}"
+        if (!fresh && !longIdle) {
+            DiagLog.write(this, "자동 재생 건너뜀: 정지 후 10분 안 지남 ($why)")
+            return
+        }
+        val id = StartupSettings.launchChannelId(this, channels)
+        if (id == null) {
+            DiagLog.write(this, "자동 재생 건너뜀: 시작 시 재생 설정 꺼짐 ($why)")
+            return
+        }
+        DiagLog.write(this, "자동 재생: $id ($why)")
         channels.firstOrNull { it.id == id }?.let { playChannel(it) }
     }
 

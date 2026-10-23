@@ -299,6 +299,7 @@ class PlaybackService : MediaLibraryService() {
                     fadeJob?.cancel()
                     pausedAt = System.currentTimeMillis()
                     prefs.edit().putLong("stopped_at", System.currentTimeMillis()).apply()
+                    DiagLog.write(this@PlaybackService, "정지 시각 기록 (이유 $reason: 1 직접, 2 오디오 포커스, 3 이어폰 빠짐, 4 원격, 5 끝남)")
                     // 직접 정지하면 꺼짐 예약도 취소 (전화 수신 등 자동 일시정지는 유지)
                     if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST && !fadingOut) {
                         SleepTimer.set(this@PlaybackService, null)
