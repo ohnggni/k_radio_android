@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.11.1 (Unreleased)
+## 1.11.1 (2026-10-23)
 
 ### Fixed
 - Start playback: after using the app on the unfolded screen and opening it later on the cover screen (or after other display changes while the app was in the background), it stayed on "stopped" instead of playing.
