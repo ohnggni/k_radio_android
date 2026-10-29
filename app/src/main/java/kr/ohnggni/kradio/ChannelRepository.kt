@@ -61,6 +61,10 @@ object ChannelRepository {
      * 원격 설정을 받아오고, 실패하면 이 주소로 마지막에 저장해둔 설정을 사용.
      * quiet = true(재생 서비스의 백그라운드 갱신)면 실패해도 화면 경고를 띄우지 않음.
      */
+    /** 마지막 load에서 원격 받기가 실패해 저장본을 썼는지 (네트워크 연결 시 다시 받기 판단용) */
+    @Volatile var lastFetchFailed = false
+        private set
+
     suspend fun load(context: Context, quiet: Boolean = false): List<Channel> = withContext(Dispatchers.IO) {
         loadLock.withLock {
             val url = SourceSettings.configUrl(context)
@@ -77,6 +81,7 @@ object ChannelRepository {
             if (err != null) Log.w("KRadio", "채널 설정 받기 실패${if (quiet) "(백그라운드)" else ""}: $err")
             // 성공은 언제나 경고를 지우고, 실패는 화면에서 부른 경우만 경고로 남김
             if (err == null || !quiet) lastError = err
+            lastFetchFailed = err != null
 
             val text = when {
                 remoteText != null -> {

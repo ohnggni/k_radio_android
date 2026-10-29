@@ -221,8 +221,23 @@ class PlaybackService : MediaLibraryService() {
                     retryNow()
                 }
             }
+            // 부팅 직후처럼 인터넷이 없어 못 받은 데이터가 있으면 연결되자마자 다시 받음
+            scope.launch {
+                if (baseFailed) {
+                    Log.i("KRadio", "네트워크 연결 → 채널 설정 다시 받기")
+                    refreshBase(force = true)
+                }
+                if (EpgRepository.needsRetry) {
+                    Log.i("KRadio", "네트워크 연결 → 편성표 다시 받기")
+                    epgRetryJob?.cancel()
+                    runCatching { EpgRepository.load(this@PlaybackService, SourceSettings.epgUrl(this@PlaybackService), quiet = true, force = true) }
+                    updateNowPlaying()
+                }
+            }
         }
     }
+    private var baseFailed = false       // 마지막 채널 설정 받기가 실패했는지
+    private var epgRetryJob: Job? = null // 편성표 받기 실패 후 다음 시도 예약
 
     override fun onCreate() {
         super.onCreate()
@@ -714,6 +729,17 @@ class PlaybackService : MediaLibraryService() {
 
     // ---------------- 방송 정보 표시 ----------------
 
+    /** 편성표 받기에 실패했으면 매분 갱신을 기다리지 않고 retryAt에 맞춰 다시 시도 */
+    private fun scheduleEpgRetry() {
+        if (!EpgRepository.needsRetry || epgRetryJob?.isActive == true) return
+        val wait = (EpgRepository.retryAt - System.currentTimeMillis()).coerceAtLeast(1_000L)
+        epgRetryJob = scope.launch {
+            delay(wait)
+            epgRetryJob = null
+            updateNowPlaying()
+        }
+    }
+
     /** 큐의 모든 채널에 현재 프로그램 표시 + 재생 중 채널에만 로고 이미지 첨부. 재생은 그대로 */
     private suspend fun updateNowPlaying() {
         try {
@@ -722,6 +748,7 @@ class PlaybackService : MediaLibraryService() {
             if (count == 0) return
 
             val epg = EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true)
+            scheduleEpgRetry()
             val byId = allChannels.associateBy { it.id }
             var changed = false
 
@@ -772,10 +799,13 @@ class PlaybackService : MediaLibraryService() {
     private suspend fun refreshBase(force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (!force && baseChannels != null && now - baseLoadedAt < BASE_REFRESH_MS) return
-        runCatching { ChannelRepository.load(this, quiet = true) }.onSuccess {
-            baseChannels = it
-            baseLoadedAt = now
-        }
+        runCatching { ChannelRepository.load(this, quiet = true) }
+            .onSuccess {
+                baseChannels = it
+                baseLoadedAt = now
+                baseFailed = ChannelRepository.lastFetchFailed
+            }
+            .onFailure { baseFailed = true }
     }
 
     /** 재생 목록용 채널 (사용자 순서, 숨김 제외) */
