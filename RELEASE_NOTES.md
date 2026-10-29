@@ -4,6 +4,16 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.11.2 (Unreleased)
+
+### Fixed
+- Program guide: on devices that start the app right after booting, before the internet connection is ready (such as car head units), the program guide was not downloaded again for 3 hours after the first failure. Over several short drives it was never updated and stopped showing after the downloaded days ran out.
+
+### Technical
+- After a failed program guide download, it is tried again after 15 s, 30 s, 1 min, 2 min, then every 5 min until it succeeds, and right away when the network becomes available. The channel settings are also downloaded again when the network becomes available after a failed attempt.
+
+---
+
 ## 1.11.1 (2026-10-23)
 
 ### Fixed
