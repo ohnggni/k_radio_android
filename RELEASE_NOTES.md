@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.11.2 (Unreleased)
+## 1.11.2 (2026-10-30)
 
 ### Fixed
 - Program guide: on devices that start the app and playback right after booting (such as car head units), the program guide was often not downloaded again for 3 hours. Over several short drives it was never updated and stopped showing after the downloaded days ran out.
