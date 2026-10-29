@@ -80,6 +80,9 @@ object EpgRepository {
     /** 받기에 실패한 뒤 다음 시도 시각 (0 = 실패 상태 아님). 재생 서비스가 지켜보다가 이 시각에 다시 받음 */
     private val _retryAt = MutableStateFlow(0L)
     val retryAt: StateFlow<Long> = _retryAt
+    /** 새 편성표를 받은 시각. 화면이 매분 정각을 기다리지 않고 바로 다시 읽게 함 */
+    private val _downloadedAt = MutableStateFlow(0L)
+    val downloadedAt: StateFlow<Long> = _downloadedAt
     /** 마지막 받기가 실패해서 다시 받아야 하는 상태 */
     val needsRetry: Boolean get() = failCount > 0
 
@@ -115,6 +118,7 @@ object EpgRepository {
                 if (fresh) return@withLock cached
             }
 
+            var downloaded = false
             val cache = File(context.filesDir, "epg_cache_${url.hashCode()}.xml")
             val cacheFresh = cache.exists() && now - cache.lastModified() < REFRESH_MS
 
@@ -126,6 +130,7 @@ object EpgRepository {
             if ((force || !cacheFresh) && url != null && !offline) {
                 val result = downloadWithRetry(url, cache)
                 checkedAt = now
+                downloaded = result.isSuccess
                 if (result.isSuccess) {
                     if (failCount > 0) Log.i("KRadio", "EPG 받기 성공 (실패 ${failCount}번 뒤)")
                     lastError = null
@@ -154,6 +159,7 @@ object EpgRepository {
             memoryLoadedAt = now
             memoryUrl = url
             memoryIds = ChannelRepository.epgIds
+            if (downloaded) _downloadedAt.value = now   // 메모리를 바꾼 뒤에 알려야 받는 쪽이 새 편성표를 읽음
             data
         }
     }

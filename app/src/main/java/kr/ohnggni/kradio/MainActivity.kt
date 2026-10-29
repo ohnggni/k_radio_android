@@ -174,6 +174,16 @@ class MainActivity : ComponentActivity() {
 
             // 화면이 보이는 동안 매 분 정각마다 편성 정보 갱신
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // 재생 서비스 등이 새 편성표를 받으면 바로 화면에 반영 (메모리에서 읽으므로 다시 받지 않음)
+                launch {
+                    EpgRepository.downloadedAt.collect { at ->
+                        if (at <= 0L) return@collect
+                        runCatching {
+                            EpgRepository.load(this@MainActivity, SourceSettings.epgUrl(this@MainActivity))
+                        }.getOrNull()?.let { epg = it }
+                        now = System.currentTimeMillis()
+                    }
+                }
                 var tick = 0
                 while (true) {
                     // 방송 점검 결과: 앞으로 나올 때 바로, 보고 있는 동안 5분마다
