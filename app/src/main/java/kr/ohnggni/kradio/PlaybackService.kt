@@ -229,7 +229,6 @@ class PlaybackService : MediaLibraryService() {
                 }
                 if (EpgRepository.needsRetry) {
                     Log.i("KRadio", "네트워크 연결 → 편성표 다시 받기")
-                    epgRetryJob?.cancel()
                     runCatching { EpgRepository.load(this@PlaybackService, SourceSettings.epgUrl(this@PlaybackService), quiet = true, force = true) }
                     updateNowPlaying()
                 }
@@ -237,7 +236,6 @@ class PlaybackService : MediaLibraryService() {
         }
     }
     private var baseFailed = false       // 마지막 채널 설정 받기가 실패했는지
-    private var epgRetryJob: Job? = null // 편성표 받기 실패 후 다음 시도 예약
 
     override fun onCreate() {
         super.onCreate()
@@ -411,6 +409,16 @@ class PlaybackService : MediaLibraryService() {
         // 새로 시작할 땐 모름(해제)으로 두고, 오토가 접속해오거나 연결 신호가 오면 확인
         CarLink.store(this, false)
         carReceiver = CarLink.watch(this, scope) { setCarConnected(it) }
+
+        // 편성표 받기가 실패하면(화면·서비스 어느 쪽이든) 매분 갱신을 기다리지 않고 정해진 시각에 다시 받음
+        scope.launch {
+            EpgRepository.retryAt.collect { at ->   // 하나씩 차례로 (받는 중에 시각이 바뀌면 끝난 뒤 새 값으로)
+                if (at <= 0L) return@collect
+                delay((at - System.currentTimeMillis()).coerceAtLeast(1_000L))
+                runCatching { EpgRepository.load(this@PlaybackService, SourceSettings.epgUrl(this@PlaybackService), quiet = true) }
+                updateNowPlaying()
+            }
+        }
 
         // 매분 정각마다 현재 방송 정보 갱신
         nowPlayingJob = scope.launch {
@@ -729,17 +737,6 @@ class PlaybackService : MediaLibraryService() {
 
     // ---------------- 방송 정보 표시 ----------------
 
-    /** 편성표 받기에 실패했으면 매분 갱신을 기다리지 않고 retryAt에 맞춰 다시 시도 */
-    private fun scheduleEpgRetry() {
-        if (!EpgRepository.needsRetry || epgRetryJob?.isActive == true) return
-        val wait = (EpgRepository.retryAt - System.currentTimeMillis()).coerceAtLeast(1_000L)
-        epgRetryJob = scope.launch {
-            delay(wait)
-            epgRetryJob = null
-            updateNowPlaying()
-        }
-    }
-
     /** 큐의 모든 채널에 현재 프로그램 표시 + 재생 중 채널에만 로고 이미지 첨부. 재생은 그대로 */
     private suspend fun updateNowPlaying() {
         try {
@@ -748,7 +745,6 @@ class PlaybackService : MediaLibraryService() {
             if (count == 0) return
 
             val epg = EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true)
-            scheduleEpgRetry()
             val byId = allChannels.associateBy { it.id }
             var changed = false
 

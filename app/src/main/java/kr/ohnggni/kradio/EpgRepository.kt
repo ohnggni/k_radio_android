@@ -5,6 +5,8 @@ import android.util.Log
 import android.util.Xml
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -75,9 +77,9 @@ object EpgRepository {
     @Volatile private var memoryIds: Set<String> = emptySet()
 
     @Volatile private var failCount = 0
-    /** 받기에 실패한 뒤 다음 시도 시각 (0 = 실패 상태 아님) */
-    @Volatile var retryAt = 0L
-        private set
+    /** 받기에 실패한 뒤 다음 시도 시각 (0 = 실패 상태 아님). 재생 서비스가 지켜보다가 이 시각에 다시 받음 */
+    private val _retryAt = MutableStateFlow(0L)
+    val retryAt: StateFlow<Long> = _retryAt
     /** 마지막 받기가 실패해서 다시 받아야 하는 상태 */
     val needsRetry: Boolean get() = failCount > 0
 
@@ -109,7 +111,7 @@ object EpgRepository {
             val cached = memory
             if (cached != null && !force && url == memoryUrl && ChannelRepository.epgIds == memoryIds) {
                 val fresh = if (offline) now - memoryLoadedAt < REFRESH_MS
-                else now - checkedAt < REFRESH_MS && (failCount == 0 || now < retryAt)   // 실패 상태면 retryAt부터 다시
+                else now - checkedAt < REFRESH_MS && (failCount == 0 || now < _retryAt.value)   // 실패 상태면 retryAt부터 다시
                 if (fresh) return@withLock cached
             }
 
@@ -118,7 +120,7 @@ object EpgRepository {
 
             if (cacheFresh && !force && !offline) {   // 저장본이 아직 새것이면 다시 받을 것 없음
                 failCount = 0
-                retryAt = 0L
+                _retryAt.value = 0L
                 checkedAt = now
             }
             if ((force || !cacheFresh) && url != null && !offline) {
@@ -128,12 +130,12 @@ object EpgRepository {
                     if (failCount > 0) Log.i("KRadio", "EPG 받기 성공 (실패 ${failCount}번 뒤)")
                     lastError = null
                     failCount = 0
-                    retryAt = 0L
+                    _retryAt.value = 0L
                 } else {
                     val msg = result.exceptionOrNull()?.message ?: "연결 실패"
                     val wait = RETRY_MS[minOf(failCount, RETRY_MS.size - 1)]
                     failCount++
-                    retryAt = now + wait
+                    _retryAt.value = now + wait
                     Log.w("KRadio", "EPG 받기 실패${if (quiet) "(백그라운드)" else ""}: $msg → ${wait / 1000}초 뒤 다시 시도")
                     if (!quiet) lastError = msg
                 }
