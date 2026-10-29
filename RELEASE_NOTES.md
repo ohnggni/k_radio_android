@@ -7,9 +7,10 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 ## 1.11.2 (Unreleased)
 
 ### Fixed
-- Program guide: on devices that start the app right after booting, before the internet connection is ready (such as car head units), the program guide was not downloaded again for 3 hours after the first failure. Over several short drives it was never updated and stopped showing after the downloaded days ran out.
+- Program guide: on devices that start the app and playback right after booting (such as car head units), the program guide was often not downloaded again for 3 hours. Over several short drives it was never updated and stopped showing after the downloaded days ran out.
 
 ### Technical
+- Reading only the saved program guide (when building the playlist and for the Android Auto list) was counted as a check for updates, so later downloads were skipped for 3 hours. Only an actual download attempt (or a saved file newer than 3 hours) now counts.
 - After a failed program guide download, it is tried again after 15 s, 30 s, 1 min, 2 min, then every 5 min until it succeeds, and right away when the network becomes available. The channel settings are also downloaded again when the network becomes available after a failed attempt.
 
 ---

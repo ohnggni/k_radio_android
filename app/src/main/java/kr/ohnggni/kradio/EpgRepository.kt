@@ -69,7 +69,8 @@ object EpgRepository {
     private val RETRY_MS = longArrayOf(15_000L, 30_000L, 60_000L, 120_000L, 300_000L)
 
     @Volatile private var memory: EpgData? = null
-    @Volatile private var memoryLoadedAt = 0L
+    @Volatile private var memoryLoadedAt = 0L   // 메모리에 올린(파일을 읽은) 시각
+    @Volatile private var checkedAt = 0L        // 인터넷 갱신을 확인한 시각 (저장본만 읽은 경우는 제외)
     @Volatile private var memoryUrl: String? = null
     @Volatile private var memoryIds: Set<String> = emptySet()
 
@@ -101,24 +102,28 @@ object EpgRepository {
         loadLock.withLock {
             val now = System.currentTimeMillis()
 
-            // 먼저 온 쪽이 방금 받아뒀고 채널 구성도 같으면 그대로 사용
+            // 먼저 온 쪽이 방금 읽어뒀고 채널 구성도 같으면 그대로 사용
+            // - 저장본만 원하는 경우(offline): 메모리에 있으면 충분
+            // - 그 외: 인터넷 갱신을 3시간 안에 확인했을 때만. 저장본만 읽은 것은 확인으로 치지 않음
+            //   (재생 목록·오토 목록이 저장본만 읽은 뒤 3시간 동안 새로 받지 않던 문제)
             val cached = memory
-            if (cached != null && !force && url == memoryUrl &&
-                ChannelRepository.epgIds == memoryIds && now - memoryLoadedAt < REFRESH_MS &&
-                (failCount == 0 || offline || now < retryAt)   // 받기 실패 상태면 retryAt부터 다시 시도
-            ) {
-                return@withLock cached
+            if (cached != null && !force && url == memoryUrl && ChannelRepository.epgIds == memoryIds) {
+                val fresh = if (offline) now - memoryLoadedAt < REFRESH_MS
+                else now - checkedAt < REFRESH_MS && (failCount == 0 || now < retryAt)   // 실패 상태면 retryAt부터 다시
+                if (fresh) return@withLock cached
             }
 
             val cache = File(context.filesDir, "epg_cache_${url.hashCode()}.xml")
             val cacheFresh = cache.exists() && now - cache.lastModified() < REFRESH_MS
 
-            if (cacheFresh && !force) {   // 저장본이 아직 새것이면 다시 받을 것 없음
+            if (cacheFresh && !force && !offline) {   // 저장본이 아직 새것이면 다시 받을 것 없음
                 failCount = 0
                 retryAt = 0L
+                checkedAt = now
             }
             if ((force || !cacheFresh) && url != null && !offline) {
                 val result = downloadWithRetry(url, cache)
+                checkedAt = now
                 if (result.isSuccess) {
                     if (failCount > 0) Log.i("KRadio", "EPG 받기 성공 (실패 ${failCount}번 뒤)")
                     lastError = null
