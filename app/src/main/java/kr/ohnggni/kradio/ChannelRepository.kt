@@ -130,7 +130,11 @@ object ChannelRepository {
     /** 채널 하나를 실제 재생 가능한 스트림 주소로 변환 */
     suspend fun resolve(ch: Channel): String = withContext(Dispatchers.IO) {
         when (ch.type) {
-            "direct" -> ch.url ?: error("[${ch.id}] url 없음")
+            "direct" -> {
+                val url = ch.url ?: error("[${ch.id}] url 없음")
+                if (isPlaylistUrl(url)) resolvePlaylist(url, ch.headers)
+                    ?: error("[${ch.id}] 재생 목록에 방송 주소 없음") else url
+            }
             "api" -> {
                 val body = httpGet(ch.api ?: error("[${ch.id}] api 없음"), ch.headers)
                     .replace("\\/", "/")
@@ -200,6 +204,74 @@ object ChannelRepository {
             }
         }
         return (cur as? String)?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * 재생 목록 파일 주소인지 (.pls, .m3u). HLS(.m3u8)는 재생기가 직접 처리하므로 제외.
+     * 인터넷 방송국의 "듣기" 링크는 대부분 이런 파일이고, 안에 실제 방송 주소가 적혀 있음
+     */
+    internal fun isPlaylistUrl(url: String): Boolean {
+        val path = runCatching { URI(url).path }.getOrNull()?.lowercase() ?: return false
+        return path.endsWith(".pls") || path.endsWith(".m3u")
+    }
+
+    /** 재생 목록을 받아 첫 번째 방송 주소를 꺼냄. PLS(File1=...)와 M3U(주석이 아닌 첫 줄) 모두 처리 */
+    internal fun resolvePlaylist(url: String, headers: Map<String, String>): String? {
+        val (body, finalUrl) = httpGetFollow(url, headers)
+        val lines = body.lineSequence().map { it.trim().removePrefix("\uFEFF") }.filter { it.isNotEmpty() }.toList()
+        val found = lines.firstNotNullOfOrNull { line ->
+            Regex("^File\\d+\\s*=\\s*(.+)$", RegexOption.IGNORE_CASE).find(line)?.groupValues?.get(1)?.trim()
+        } ?: lines.firstOrNull { line ->   // M3U: 주석(#)·구역([..])이 아닌 첫 주소 줄
+            !line.startsWith("#") && !line.startsWith("[") &&
+                (line.startsWith("http://", true) || line.startsWith("https://", true) || !line.contains("="))
+        }
+        val stream = found ?: return null
+        // 상대 주소면 재생 목록 위치 기준으로
+        val abs = runCatching { URI(finalUrl).resolve(stream).toString() }.getOrDefault(stream)
+        Log.i("KRadio", "재생 목록 해석: $url → $abs")
+        return abs
+    }
+
+    /**
+     * 리디렉션을 직접 따라가며 받기. 기본 연결은 https→http 전환을 따라가지 않는데,
+     * 인터넷 방송 사이트는 https 주소를 http로 돌려보내는 경우가 많음. 돌려주는 값: (본문, 최종 주소)
+     */
+    private fun httpGetFollow(url: String, headers: Map<String, String>, timeoutMs: Int = 8000): Pair<String, String> {
+        var current = url
+        repeat(5) {
+            val conn = URI(current).toURL().openConnection() as HttpURLConnection
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
+            conn.instanceFollowRedirects = false
+            headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
+            try {
+                val code = conn.responseCode
+                if (code in 300..399) {
+                    val loc = conn.getHeaderField("Location") ?: error("HTTP $code 이동할 주소 없음: $current")
+                    current = URI(current).resolve(loc).toString()
+                    return@repeat
+                }
+                if (code !in 200..299) error("HTTP $code: $current")
+                // 재생 목록은 작은 텍스트 파일. 실수로 방송 주소를 넣었을 때 끝없이 받지 않게 64KB까지만
+                val bytes = conn.inputStream.use { input ->
+                    val buf = java.io.ByteArrayOutputStream()
+                    val chunk = ByteArray(8192)
+                    while (buf.size() < 65536) {
+                        val n = input.read(chunk)
+                        if (n < 0) break
+                        buf.write(chunk, 0, n)
+                    }
+                    buf.toByteArray()
+                }
+                val text = runCatching {
+                    Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                }.getOrElse { String(bytes, charset("EUC-KR")) }   // 국내 방송 사이트는 옛 한글 인코딩도 씀
+                return text to current
+            } finally {
+                conn.disconnect()
+            }
+        }
+        error("리디렉션이 너무 많음: $url")
     }
 
     private fun httpGet(url: String, headers: Map<String, String>, timeoutMs: Int = 5000): String {

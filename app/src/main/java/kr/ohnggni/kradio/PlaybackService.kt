@@ -274,6 +274,11 @@ class PlaybackService : MediaLibraryService() {
                 scheduleRetry(error.errorCodeName)
             }
 
+            // 방송이 보내는 곡 정보 등(인터넷 방송 ICY, HLS ID3). 지금은 어떤 방송이 보내는지 확인용 로그만
+            override fun onMetadata(metadata: androidx.media3.common.Metadata) {
+                logStreamMetadata(exo.currentMediaItem?.mediaId, metadata)
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying && retryCount > 0) {
                     Log.i("KRadio", "재연결 성공")
@@ -897,6 +902,33 @@ class PlaybackService : MediaLibraryService() {
             builder.setMimeType(MimeTypes.APPLICATION_M3U8)
         }
         return builder.build()
+    }
+
+    /** 방송이 보낸 메타데이터를 로그로 (곡 제목 표시 가능 여부 확인용). 같은 내용은 한 번만 */
+    private var lastMetaLog: String? = null
+    private fun logStreamMetadata(channelId: String?, metadata: androidx.media3.common.Metadata) {
+        for (i in 0 until metadata.length()) {
+            val text = when (val e = metadata.get(i)) {
+                is androidx.media3.extractor.metadata.icy.IcyInfo -> {
+                    // 국내 인터넷 방송은 옛 한글 인코딩(EUC-KR)으로 보내기도 해서 원본 바이트를 다시 풀어 봄
+                    val raw = e.rawMetadata
+                    val decoded = runCatching {
+                        Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(raw)).toString()
+                    }.getOrElse { String(raw, charset("EUC-KR")) }
+                    "ICY 곡 정보: title=${e.title} | 원본=${decoded.trimEnd('\u0000').trim()}"
+                }
+                is androidx.media3.extractor.metadata.icy.IcyHeaders ->
+                    "ICY 헤더: name=${e.name} genre=${e.genre} bitrate=${e.bitrate} metaint=${e.metadataInterval}"
+                is androidx.media3.extractor.metadata.id3.TextInformationFrame ->
+                    "ID3 ${e.id}: ${e.values.joinToString(" / ")}"
+                else -> "기타 ${e.javaClass.simpleName}: $e"
+            }
+            val line = "메타데이터[$channelId] $text"
+            if (line != lastMetaLog) {
+                lastMetaLog = line
+                Log.i("KRadio", line)
+            }
+        }
     }
 
     /** 프로그램명 (부제가 있으면 "제목 · 부제") */

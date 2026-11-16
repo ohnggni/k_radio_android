@@ -61,7 +61,7 @@ fun GuideScreen(onBack: () -> Unit) {
             Para("채널 목록과 재생 방법을 담은 JSON 파일이에요. channels 배열 순서가 기본 채널 순서(이전/다음 순서)가 돼요.")
             Bullet("id: 채널 고유 ID. 바꾸면 앱에서 정한 순서·숨김·수정과 연결이 끊겨요")
             Bullet("name · group · logo: 이름, 묶음, 로고 (파일 이름만 쓰면 logoBase 뒤에 붙여요)")
-            Bullet("type \"direct\": url에 고정 스트림 주소 (m3u8, mp3, aac)")
+            Bullet("type \"direct\": url에 고정 스트림 주소 (m3u8, mp3, aac) 또는 재생 목록 주소 (pls, m3u: 안의 첫 번째 방송 주소를 씀)")
             Bullet("type \"api\": 재생할 때마다 api 주소를 불러서 extract 규칙(json 경로 또는 regex)으로 주소를 뽑아요. headers에는 headerSets의 이름을 적어요")
             Bullet("epg: 편성표의 채널 ID (예: 12345.naver)")
             Bullet("epgUrl (파일 맨 위): 편성표 주소")

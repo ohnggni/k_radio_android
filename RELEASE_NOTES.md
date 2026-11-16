@@ -4,6 +4,17 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.12.0 (Unreleased)
+
+### Added
+- Custom channels: playlist links (.pls, .m3u) such as the "listen" links of internet radio stations can be entered as they are. The first stream address in the playlist is played, so the channel keeps working when the station changes its server address.
+
+### Technical
+- Playlists are downloaded right before playback (redirects followed manually, including https to http, up to 64 KB), and the first `File1=` entry (PLS) or the first non-comment line (M3U) is used. HLS (.m3u8) is still handled by the player directly.
+- Stream metadata (ICY song titles and headers, HLS ID3 frames) is written to the log to find out which stations send song titles.
+
+---
+
 ## 1.11.2 (2026-10-30)
 
 ### Fixed

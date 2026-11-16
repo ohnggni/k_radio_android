@@ -307,7 +307,7 @@ private fun ChannelDialog(
                 )
                 if (!builtIn) {
                     Text(
-                        "m3u8(HLS), mp3, aac 스트림 주소를 지원해",
+                        "m3u8(HLS), mp3, aac 스트림 주소와 pls·m3u 재생 목록 주소를 지원해",
                         style = hintStyle,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
