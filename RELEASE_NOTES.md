@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.13.0 (Unreleased)
+## 1.13.0 (2026-11-18)
 
 ### Added
 - Live song information for supported broadcasts: the song that is playing now (title and artist) is shown in place of the program in the player, the channel list, lock screen, Android Auto, widget and watch, and the album cover replaces the channel logo in the player when available. When the song ends (talk or ads), the program is shown again. Long song titles scroll.
