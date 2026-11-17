@@ -8,7 +8,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ### Added
 - Custom channels: playlist links (.pls, .m3u) such as the "listen" links of internet radio stations can be entered as they are. The first stream address in the playlist is played, so the channel keeps working when the station changes its server address.
-- Song titles: when an internet radio station sends the title of the current song, it is shown in place of the program in the player, notification, lock screen, Android Auto, widget and watch. Titles in the legacy Korean encoding (EUC-KR) are shown correctly.
+- Song titles: when an internet radio station sends the title of the current song, it is shown in place of the program in the player, the channel list, lock screen, Android Auto, widget and watch. Titles in the legacy Korean encoding (EUC-KR) are shown correctly.
 
 ### Technical
 - Playlists are downloaded right before playback (redirects followed manually, including https to http, up to 64 KB), and the first `File1=` entry (PLS) or the first non-comment line (M3U) is used. HLS (.m3u8) is still handled by the player directly.

@@ -210,6 +210,7 @@ fun MainScreen(
                         ChannelTile(
                             ch = ch,
                             program = epg?.display(ch.epg, now),
+                            song = if (ch.id == currentId) song else null,
                             selected = ch.id == currentId,
                             down = ch.id in downIds,
                             favorite = ch.id in favorites,
@@ -221,6 +222,7 @@ fun MainScreen(
                         ChannelRow(
                             ch = ch,
                             program = epg?.display(ch.epg, now),
+                            song = if (ch.id == currentId) song else null,
                             selected = ch.id == currentId,
                             down = ch.id in downIds,
                             favorite = ch.id in favorites,
@@ -473,6 +475,7 @@ private fun ViewToggle(grid: Boolean, onClick: () -> Unit) {
 private fun ChannelTile(
     ch: Channel,
     program: Program?,
+    song: String?,   // 재생 중인 인터넷 방송의 곡 제목 (있으면 프로그램 대신)
     selected: Boolean,
     down: Boolean,
     favorite: Boolean,
@@ -501,7 +504,7 @@ private fun ChannelTile(
             overflow = TextOverflow.Ellipsis
         )
         Text(
-            if (down) "점검 중" else program?.label() ?: " ",
+            if (down) "점검 중" else song?.let { "♪ $it" } ?: program?.label() ?: " ",
             style = MaterialTheme.typography.labelSmall,
             color = cs.onSurfaceVariant,
             maxLines = 1,
@@ -514,6 +517,7 @@ private fun ChannelTile(
 private fun ChannelRow(
     ch: Channel,
     program: Program?,
+    song: String?,   // 재생 중인 인터넷 방송의 곡 제목 (있으면 프로그램 대신, 방송 시간은 숨김)
     selected: Boolean,
     down: Boolean,
     favorite: Boolean,
@@ -552,7 +556,7 @@ private fun ChannelRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    if (down) "방송 연결 문제를 확인하고 있어요" else program?.label() ?: "편성 정보 없음",
+                    if (down) "방송 연결 문제를 확인하고 있어요" else song?.let { "♪ $it" } ?: program?.label() ?: "편성 정보 없음",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -572,7 +576,7 @@ private fun ChannelRow(
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
-            } else if (program != null) {
+            } else if (program != null && song == null) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     program.timeRange(),
