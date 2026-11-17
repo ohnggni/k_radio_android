@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -510,6 +511,7 @@ private fun ChannelTile(
             style = MaterialTheme.typography.labelSmall,
             color = cs.onSurfaceVariant,
             maxLines = 1,
+            modifier = songMarquee(song != null && !down),
             overflow = TextOverflow.Ellipsis
         )
     }
@@ -562,6 +564,7 @@ private fun ChannelRow(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    modifier = songMarquee(song != null && !down),
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -710,6 +713,7 @@ private fun PlayerBar(
                         style = MaterialTheme.typography.bodySmall,
                         color = onContainer.copy(alpha = 0.8f),
                         maxLines = 1,
+                        modifier = songMarquee(status.isEmpty() && song != null),
                         overflow = TextOverflow.Ellipsis
                     )
                     val stateLabel = when {
@@ -807,6 +811,10 @@ private fun Program.timeRange(): String =
     "${hm.format(Date(start))}–${hm.format(Date(stop))}"
 
 // ---------------- 로고 ----------------
+
+/** 곡 제목은 길면 옆으로 흐르게 (프로그램명 등은 기존처럼 …로 줄임) */
+private fun songMarquee(on: Boolean): Modifier =
+    if (on) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1_500) else Modifier
 
 @Composable
 fun ChannelLogo(url: String?, name: String, modifier: Modifier = Modifier) {

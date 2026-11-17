@@ -7,11 +7,11 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 ## 1.13.0 (Unreleased)
 
 ### Added
-- Live song information for supported broadcasts: the song that is playing now (title and artist) is shown in place of the program in the player, the channel list, lock screen, Android Auto, widget and watch, and the album cover replaces the channel logo in the player when available. When no song is playing (talk or ads), the last song is shown as "just played".
+- Live song information for supported broadcasts: the song that is playing now (title and artist) is shown in place of the program in the player, the channel list, lock screen, Android Auto, widget and watch, and the album cover replaces the channel logo in the player when available. When the song ends (talk or ads), the program is shown again. Long song titles scroll.
 - **Data:** which channels have song information is set in the channel config (`nowPlaying` per channel, `nowPlayingUrl` template at the top level). Channels without it behave as before.
 
 ### Technical
-- Only the channel being played is checked, every 30 seconds (once right away when playback starts or the channel changes), and polling stops when playback stops. Failures are silent and keep the last result; playback is never affected.
+- Only the channel being played is checked, every 30 seconds (once right away when playback starts or the channel changes), and polling stops when playback stops. The display also switches back to the program at the song's end time without an extra request. Failures are silent and keep the last result; playback is never affected.
 - The current song is decided from the play start and end times of the latest entry. Placeholder titles (empty or ".") are ignored. A doubled album cover address (proxy prefix followed by the original address) is reduced to the original address.
 - Results use the same path as internet radio song titles (`kradio.song`), plus `kradio.songart` for the album cover address.
 

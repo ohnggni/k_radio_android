@@ -976,16 +976,24 @@ class PlaybackService : MediaLibraryService() {
         Log.i("KRadio", "선곡 정보 조회 시작: ${ch.id}")
         songPollJob = scope.launch {
             var last: NowPlaying? = null   // 실패하면 마지막 성공값으로 계속 판정
+            var nextFetch = 0L
             while (isActive) {
-                // 폴링은 선곡 정보 부가 기능이라 어떤 실패도 재생에 영향 주지 않음 (fetch는 null만 돌려줌)
-                NowPlayingRepository.fetch(template, npId)?.let { last = it }
+                val now = System.currentTimeMillis()
+                // 받기는 30초마다만. 폴링은 부가 기능이라 어떤 실패도 재생에 영향 주지 않음 (fetch는 null만 돌려줌)
+                if (now >= nextFetch) {
+                    NowPlayingRepository.fetch(template, npId)?.let { last = it }
+                    nextFetch = System.currentTimeMillis() + NOW_PLAYING_POLL_MS
+                }
                 applyNowPlaying(ch.id, last)
-                delay(NOW_PLAYING_POLL_MS)
+                // 곡이 끝나는 시각이 다음 받기보다 먼저면 그때 한 번 더 판정 (받지 않고 표시만 프로그램으로 되돌림)
+                val end = (NowPlayingRepository.songState(last, System.currentTimeMillis()) as? SongState.Playing)?.track?.endedAt
+                val wake = if (end != null) minOf(nextFetch, end + 500) else nextFetch
+                delay((wake - System.currentTimeMillis()).coerceAtLeast(1_000L))
             }
         }
     }
 
-    /** 선곡 정보를 표시용 곡 제목·앨범아트로 바꿔 반영. 지금 곡이 아니면 "방금 나온 곡"으로 구분 */
+    /** 선곡 정보를 표시용 곡 제목·앨범아트로 바꿔 반영. 곡이 끝났으면(토크·광고 구간) 지우고 프로그램 표시로 */
     private suspend fun applyNowPlaying(channelId: String, np: NowPlaying?) {
         // 조회 중에 채널이 바뀌었거나 멈췄으면 버림
         if (nowPlayingChannelId != channelId || exoPlayer?.currentMediaItem?.mediaId != channelId) return
@@ -995,11 +1003,7 @@ class PlaybackService : MediaLibraryService() {
                 art = st.track.albumArtUrl
                 songText(st.track)
             }
-            is SongState.JustPlayed -> {
-                art = st.track.albumArtUrl
-                songText(st.track) + " · 방금 나온 곡"
-            }
-            SongState.None -> null
+            is SongState.JustPlayed, SongState.None -> null
         }
         val oldText = streamSongs[channelId]
         val oldArt = songArts[channelId]
