@@ -20,6 +20,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -67,6 +68,7 @@ class MainActivity : ComponentActivity() {
     private var currentId by mutableStateOf<String?>(null)
     private var isOn by mutableStateOf(false)
     private var status by mutableStateOf("채널 목록 불러오는 중...")
+    private var song by mutableStateOf<String?>(null)   // 인터넷 방송이 보내 준 지금 곡 제목
 
     private var screen by mutableStateOf(Screen.MAIN)
     private var warning by mutableStateOf<String?>(null)
@@ -235,6 +237,7 @@ class MainActivity : ComponentActivity() {
                             currentId = currentId,
                             isOn = isOn,
                             status = status,
+                            song = song,
                             enabled = controller != null,
                             onChannelClick = { playChannel(it) },
                             onPlayStop = { playStop() },
@@ -394,7 +397,11 @@ class MainActivity : ComponentActivity() {
             controller = c
             isOn = c.playWhenReady
             currentId = c.currentMediaItem?.mediaId
+            song = c.mediaMetadata.extras?.getString(SONG_EXTRA)
             c.addListener(object : Player.Listener {
+                override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                    song = mediaMetadata.extras?.getString(SONG_EXTRA)
+                }
                 override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                     isOn = playWhenReady
                     sleepAt = SleepTimer.get(this@MainActivity)

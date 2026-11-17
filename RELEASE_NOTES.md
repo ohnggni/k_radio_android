@@ -8,10 +8,12 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ### Added
 - Custom channels: playlist links (.pls, .m3u) such as the "listen" links of internet radio stations can be entered as they are. The first stream address in the playlist is played, so the channel keeps working when the station changes its server address.
+- Song titles: when an internet radio station sends the title of the current song, it is shown in place of the program in the player, notification, lock screen, Android Auto, widget and watch. Titles in the legacy Korean encoding (EUC-KR) are shown correctly.
 
 ### Technical
 - Playlists are downloaded right before playback (redirects followed manually, including https to http, up to 64 KB), and the first `File1=` entry (PLS) or the first non-comment line (M3U) is used. HLS (.m3u8) is still handled by the player directly.
-- Stream metadata (ICY song titles and headers, HLS ID3 frames) is written to the log to find out which stations send song titles.
+- Stream metadata (ICY song titles and headers, HLS ID3 frames) is written to the log. The checked broadcaster HLS streams carry only timestamp frames, no song titles.
+- The song title is taken from the raw ICY metadata (`StreamTitle`), decoded as UTF-8 or else EUC-KR, and passed to the screen in the media item extras (`kradio.song`). It is cleared when the channel changes or playback stops; an empty title keeps the program guide.
 
 ---
 

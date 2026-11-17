@@ -116,6 +116,7 @@ fun MainScreen(
     currentId: String?,
     isOn: Boolean,
     status: String,
+    song: String?,          // 인터넷 방송이 보내 준 지금 곡 제목 (있으면 재생기에 프로그램 대신 표시)
     enabled: Boolean,
     onChannelClick: (Channel) -> Unit,
     onPlayStop: () -> Unit,
@@ -162,6 +163,7 @@ fun MainScreen(
             PlayerBar(
                 ch = current,
                 program = epg?.display(current?.epg, now),
+                song = song,
                 isOn = isOn,
                 status = status,
                 enabled = enabled,
@@ -586,6 +588,7 @@ private fun ChannelRow(
 private fun PlayerBar(
     ch: Channel?,
     program: Program?,
+    song: String?,
     isOn: Boolean,
     status: String,
     enabled: Boolean,
@@ -693,7 +696,7 @@ private fun PlayerBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val sub = status.ifEmpty { program?.label() ?: "" }
+                    val sub = status.ifEmpty { song?.let { "♪ $it" } ?: program?.label() ?: "" }
                     Text(
                         sub.ifEmpty { " " },
                         style = MaterialTheme.typography.bodySmall,

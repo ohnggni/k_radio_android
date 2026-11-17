@@ -67,6 +67,8 @@ import android.provider.Settings
 const val ACTION_WIDGET_STOP = "kr.ohnggni.kradio.widget.STOP"
 const val ACTION_WIDGET_PLAY_CHANNEL = "kr.ohnggni.kradio.widget.PLAY_CHANNEL_DIRECT"
 private const val SCHEME = "kradio"
+/** 재생 항목 정보(extras)에 넣는 인터넷 방송 곡 제목 키. 앱 화면이 읽음 */
+internal const val SONG_EXTRA = "kradio.song"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
 private const val MAX_RETRY_DELAY_MS = 30_000L       // 재연결 최대 대기 간격
 
@@ -264,6 +266,7 @@ class PlaybackService : MediaLibraryService() {
                 mediaItem?.mediaId?.let { prefs.edit().putString("last_channel", it).apply() }
                 // 방송 정보만 바뀐 경우(PLAYLIST_CHANGED)는 재연결 시도를 취소하지 않음
                 if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                    streamSongs.clear()   // 곡 제목은 지금 듣는 채널 것만 (다른 채널로 가면 지움)
                     cancelRetry()
                     scope.launch { updateNowPlaying() }
                 updateWidget()
@@ -276,7 +279,9 @@ class PlaybackService : MediaLibraryService() {
 
             // 방송이 보내는 곡 정보 등(인터넷 방송 ICY, HLS ID3). 지금은 어떤 방송이 보내는지 확인용 로그만
             override fun onMetadata(metadata: androidx.media3.common.Metadata) {
-                logStreamMetadata(exo.currentMediaItem?.mediaId, metadata)
+                val id = exo.currentMediaItem?.mediaId
+                logStreamMetadata(id, metadata)
+                if (id != null) onStreamSong(id, metadata)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -315,6 +320,10 @@ class PlaybackService : MediaLibraryService() {
                     // 사용자가 정지하면 재연결 중단 + 정지 시각 기록 (다음 실행 시 자동 재생 판단용)
                     cancelRetry()
                     fadeJob?.cancel()
+                    if (streamSongs.isNotEmpty()) {   // 멈추면 곡 제목도 지움 (다시 틀면 방송이 새로 보내 줌)
+                        streamSongs.clear()
+                        scope.launch { updateNowPlaying() }
+                    }
                     pausedAt = System.currentTimeMillis()
                     prefs.edit().putLong("stopped_at", System.currentTimeMillis()).apply()
                     DiagLog.write(this@PlaybackService, "정지 시각 기록 (이유 $reason: 1 직접, 2 오디오 포커스, 3 이어폰 빠짐, 4 원격, 5 끝남)")
@@ -757,15 +766,18 @@ class PlaybackService : MediaLibraryService() {
                 val item = exo.getMediaItemAt(i)
                 val ch = byId[item.mediaId] ?: return@map item
                 val program = epg.display(ch.epg)
-                val artist = program?.let { programLabel(it) } ?: ch.group
-                val subtitle = program?.let { programWithTime(it) } ?: ch.group
+                // 인터넷 방송이 곡 제목을 보내 주면 프로그램 대신 곡 제목 (알림·잠금화면·오토·위젯·워치)
+                val song = streamSongs[ch.id]
+                val artist = song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group
+                val subtitle = song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group
                 // 항목에는 로고 주소만. 재생 중 채널의 그림 데이터는 nowPlayingMeta()가 내보낼 때 붙임
                 val wantArt = logoUri(ch)
 
                 val cur = item.mediaMetadata
                 if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist &&
                     cur.subtitle?.toString() == subtitle && cur.displayTitle?.toString() == ch.name &&
-                    cur.artworkUri == wantArt && cur.artworkData == null) {
+                    cur.artworkUri == wantArt && cur.artworkData == null &&
+                    cur.extras?.getString(SONG_EXTRA) == song) {
                     item
                 } else {
                     changed = true
@@ -778,6 +790,7 @@ class PlaybackService : MediaLibraryService() {
                                 .setSubtitle(subtitle)
                                 .setArtworkUri(wantArt)
                                 .setArtworkData(null, null)
+                                .setExtras(song?.let { android.os.Bundle().apply { putString(SONG_EXTRA, it) } })
                                 .build()
                         )
                         .build()
@@ -902,6 +915,32 @@ class PlaybackService : MediaLibraryService() {
             builder.setMimeType(MimeTypes.APPLICATION_M3U8)
         }
         return builder.build()
+    }
+
+    /** 채널 ID → 인터넷 방송(ICY)이 보낸 지금 곡 제목 */
+    private val streamSongs = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** ICY 곡 정보가 오면 저장하고 표시 갱신. 빈 제목을 보내는 방송은 편성 정보 그대로 */
+    private fun onStreamSong(channelId: String, metadata: androidx.media3.common.Metadata) {
+        for (i in 0 until metadata.length()) {
+            val e = metadata.get(i) as? androidx.media3.extractor.metadata.icy.IcyInfo ?: continue
+            val song = icySongTitle(e.rawMetadata)
+            val old = streamSongs[channelId]
+            if (song == old) continue
+            if (song == null) streamSongs.remove(channelId) else streamSongs[channelId] = song
+            Log.i("KRadio", "곡 제목[$channelId]: ${song ?: "(없음)"}")
+            scope.launch { updateNowPlaying() }
+        }
+    }
+
+    /** ICY 원본 바이트에서 StreamTitle 꺼내기. 재생기는 라틴 문자로 풀어서 한글(EUC-KR)이 깨지므로 직접 풂 */
+    private fun icySongTitle(raw: ByteArray): String? {
+        val text = runCatching {
+            Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(raw)).toString()
+        }.getOrElse { String(raw, charset("EUC-KR")) }
+        val m = Regex("StreamTitle='(.*?)';(?=\\s*(Stream\\w*=|$|\\u0000))", RegexOption.DOT_MATCHES_ALL).find(text)
+            ?: Regex("StreamTitle='(.*?)'", RegexOption.DOT_MATCHES_ALL).find(text)
+        return m?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() && it != "-" }
     }
 
     /** 방송이 보낸 메타데이터를 로그로 (곡 제목 표시 가능 여부 확인용). 같은 내용은 한 번만 */
