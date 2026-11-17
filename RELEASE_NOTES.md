@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.12.0 (Unreleased)
+## 1.12.0 (2026-11-17)
 
 ### Added
 - Custom channels: playlist links (.pls, .m3u) such as the "listen" links of internet radio stations can be entered as they are. The first stream address in the playlist is played, so the channel keeps working when the station changes its server address.
