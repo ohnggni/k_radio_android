@@ -264,9 +264,13 @@ class PlaybackService : MediaLibraryService() {
         exo.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 mediaItem?.mediaId?.let { prefs.edit().putString("last_channel", it).apply() }
+                // 곡 제목은 지금 듣는 채널 것만. 앱에서 채널을 누르면 재생 목록을 새로 만들어서
+                // 전환 사유가 PLAYLIST_CHANGED로 오므로, 사유가 아니라 채널 ID로 판단
+                if (streamSongs.keys.retainAll(setOfNotNull(mediaItem?.mediaId))) {
+                    scope.launch { updateNowPlaying() }   // 다른 채널 항목에 남은 곡 제목 표시도 지움
+                }
                 // 방송 정보만 바뀐 경우(PLAYLIST_CHANGED)는 재연결 시도를 취소하지 않음
                 if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
-                    streamSongs.clear()   // 곡 제목은 지금 듣는 채널 것만 (다른 채널로 가면 지움)
                     cancelRetry()
                     scope.launch { updateNowPlaying() }
                 updateWidget()
@@ -926,9 +930,9 @@ class PlaybackService : MediaLibraryService() {
             val e = metadata.get(i) as? androidx.media3.extractor.metadata.icy.IcyInfo ?: continue
             val song = icySongTitle(e.rawMetadata)
             val old = streamSongs[channelId]
-            if (song == old) continue
             if (song == null) streamSongs.remove(channelId) else streamSongs[channelId] = song
-            Log.i("KRadio", "곡 제목[$channelId]: ${song ?: "(없음)"}")
+            if (song != old) Log.i("KRadio", "곡 제목[$channelId]: ${song ?: "(없음)"}")
+            // 기억과 같아도 화면은 다시 맞춤 (재생 목록이 새로 만들어져 표시가 빠졌을 수 있음). 바뀐 게 없으면 갱신 안 함
             scope.launch { updateNowPlaying() }
         }
     }
@@ -984,11 +988,13 @@ class PlaybackService : MediaLibraryService() {
     private fun decoratedItem(ch: Channel, epg: EpgData?): MediaItem {
         val item = placeholderItem(ch)
         val program = epg?.display(ch.epg)
+        val song = streamSongs[ch.id]   // 재생 목록을 새로 만들 때도 지금 곡 제목 유지
         return item.buildUpon()
             .setMediaMetadata(
                 item.mediaMetadata.buildUpon()
-                    .setArtist(program?.let { programLabel(it) } ?: ch.group)
-                    .setSubtitle(program?.let { programWithTime(it) } ?: ch.group)
+                    .setArtist(song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group)
+                    .setSubtitle(song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group)
+                    .setExtras(song?.let { android.os.Bundle().apply { putString(SONG_EXTRA, it) } })
                     .build()
             )
             .build()
