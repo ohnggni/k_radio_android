@@ -952,7 +952,7 @@ class PlaybackService : MediaLibraryService() {
 
     /** 채널 ID → 선곡 정보의 앨범아트 주소 (있을 때만) */
     private val songArts = java.util.concurrent.ConcurrentHashMap<String, String>()
-    private var nowPlayingJob: Job? = null
+    private var songPollJob: Job? = null
     private var nowPlayingChannelId: String? = null
 
     /**
@@ -965,16 +965,16 @@ class PlaybackService : MediaLibraryService() {
         val ch = if (exo.playWhenReady) allChannels.firstOrNull { it.id == exo.currentMediaItem?.mediaId } else null
         val npId = ch?.nowPlaying
         if (ch == null || npId == null || template == null) {
-            nowPlayingJob?.cancel()
-            nowPlayingJob = null
+            songPollJob?.cancel()
+            songPollJob = null
             nowPlayingChannelId = null
             return
         }
-        if (nowPlayingChannelId == ch.id && nowPlayingJob?.isActive == true) return
-        nowPlayingJob?.cancel()
+        if (nowPlayingChannelId == ch.id && songPollJob?.isActive == true) return
+        songPollJob?.cancel()
         nowPlayingChannelId = ch.id
         Log.i("KRadio", "선곡 정보 조회 시작: ${ch.id}")
-        nowPlayingJob = scope.launch {
+        songPollJob = scope.launch {
             var last: NowPlaying? = null   // 실패하면 마지막 성공값으로 계속 판정
             while (isActive) {
                 // 폴링은 선곡 정보 부가 기능이라 어떤 실패도 재생에 영향 주지 않음 (fetch는 null만 돌려줌)
