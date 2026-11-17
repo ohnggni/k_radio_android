@@ -25,12 +25,17 @@ data class Channel(
     val extractRegex: String? = null,
     val epg: String? = null,          // 편성표(XMLTV) 채널 아이디
     val logo: String? = null,         // 로고 (asset:///logos/... 또는 인터넷 주소)
+    val nowPlaying: String? = null,   // 실시간 선곡 정보 채널 ID (없으면 선곡 정보 기능 끔)
 )
 
 object ChannelRepository {
 
     /** 설정 파일에 적힌 EPG 주소 */
     @Volatile var epgUrl: String? = null
+        private set
+
+    /** 실시간 선곡 정보 주소 틀. {id} 자리에 채널의 nowPlaying 값 */
+    @Volatile var nowPlayingUrl: String? = null
         private set
 
     /** 설정 파일의 logoBase (내장 로고가 없을 때만 예비로 사용) */
@@ -154,6 +159,7 @@ object ChannelRepository {
         val root = JSONObject(ConfigCrypto.open(text))
         epgUrl = root.optString("epgUrl").ifEmpty { null }
         logoBase = root.optString("logoBase").ifEmpty { null }
+        nowPlayingUrl = root.optString("nowPlayingUrl").ifEmpty { null }
         latestVersionCode = root.optLong("latestVersionCode", 0L).takeIf { it > 0 }
         latestVersionName = root.optString("latestVersionName").ifEmpty { null }
         updateUrl = root.optString("updateUrl").ifEmpty { null }
@@ -182,6 +188,7 @@ object ChannelRepository {
                 extractRegex = ex?.optString("regex")?.ifEmpty { null },
                 epg = o.optString("epg").ifEmpty { null },
                 logo = logo,
+                nowPlaying = o.optString("nowPlaying").ifEmpty { null },
             )
         }
         epgIds = list.mapNotNull { it.epg }.toSet()
@@ -274,7 +281,7 @@ object ChannelRepository {
         error("리디렉션이 너무 많음: $url")
     }
 
-    private fun httpGet(url: String, headers: Map<String, String>, timeoutMs: Int = 5000): String {
+    internal fun httpGet(url: String, headers: Map<String, String>, timeoutMs: Int = 5000): String {
         val conn = URI(url).toURL().openConnection() as HttpURLConnection
         conn.connectTimeout = timeoutMs
         conn.readTimeout = timeoutMs

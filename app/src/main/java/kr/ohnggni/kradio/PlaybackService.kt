@@ -41,6 +41,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -69,6 +70,9 @@ const val ACTION_WIDGET_PLAY_CHANNEL = "kr.ohnggni.kradio.widget.PLAY_CHANNEL_DI
 private const val SCHEME = "kradio"
 /** 재생 항목 정보(extras)에 넣는 인터넷 방송 곡 제목 키. 앱 화면이 읽음 */
 internal const val SONG_EXTRA = "kradio.song"
+/** 선곡 정보가 있으면 앨범아트 주소 (앱 화면이 읽음) */
+internal const val SONG_ART_EXTRA = "kradio.songart"
+private const val NOW_PLAYING_POLL_MS = 30_000L  // 선곡 정보 조회 주기 (이보다 짧게 하지 않음)
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
 private const val MAX_RETRY_DELAY_MS = 30_000L       // 재연결 최대 대기 간격
 
@@ -267,8 +271,10 @@ class PlaybackService : MediaLibraryService() {
                 // 곡 제목은 지금 듣는 채널 것만. 앱에서 채널을 누르면 재생 목록을 새로 만들어서
                 // 전환 사유가 PLAYLIST_CHANGED로 오므로, 사유가 아니라 채널 ID로 판단
                 if (streamSongs.keys.retainAll(setOfNotNull(mediaItem?.mediaId))) {
+                    songArts.keys.retainAll(streamSongs.keys)
                     scope.launch { updateNowPlaying() }   // 다른 채널 항목에 남은 곡 제목 표시도 지움
                 }
+                syncNowPlaying()
                 // 방송 정보만 바뀐 경우(PLAYLIST_CHANGED)는 재연결 시도를 취소하지 않음
                 if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                     cancelRetry()
@@ -326,6 +332,7 @@ class PlaybackService : MediaLibraryService() {
                     fadeJob?.cancel()
                     if (streamSongs.isNotEmpty()) {   // 멈추면 곡 제목도 지움 (다시 틀면 방송이 새로 보내 줌)
                         streamSongs.clear()
+                        songArts.clear()
                         scope.launch { updateNowPlaying() }
                     }
                     pausedAt = System.currentTimeMillis()
@@ -343,6 +350,7 @@ class PlaybackService : MediaLibraryService() {
                 } else {
                     resumeAtLiveEdgeIfStale()
                 }
+                syncNowPlaying()   // 재생 시작이면 선곡 정보 조회 시작, 정지면 중단
                 updateWidget()
             }
 
@@ -772,6 +780,7 @@ class PlaybackService : MediaLibraryService() {
                 val program = epg.display(ch.epg)
                 // 인터넷 방송이 곡 제목을 보내 주면 프로그램 대신 곡 제목 (알림·잠금화면·오토·위젯·워치)
                 val song = streamSongs[ch.id]
+                val songArt = songArts[ch.id]
                 val artist = song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group
                 val subtitle = song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group
                 // 항목에는 로고 주소만. 재생 중 채널의 그림 데이터는 nowPlayingMeta()가 내보낼 때 붙임
@@ -781,7 +790,8 @@ class PlaybackService : MediaLibraryService() {
                 if (cur.title?.toString() == ch.name && cur.artist?.toString() == artist &&
                     cur.subtitle?.toString() == subtitle && cur.displayTitle?.toString() == ch.name &&
                     cur.artworkUri == wantArt && cur.artworkData == null &&
-                    cur.extras?.getString(SONG_EXTRA) == song) {
+                    cur.extras?.getString(SONG_EXTRA) == song &&
+                    cur.extras?.getString(SONG_ART_EXTRA) == songArt) {
                     item
                 } else {
                     changed = true
@@ -794,7 +804,7 @@ class PlaybackService : MediaLibraryService() {
                                 .setSubtitle(subtitle)
                                 .setArtworkUri(wantArt)
                                 .setArtworkData(null, null)
-                                .setExtras(song?.let { android.os.Bundle().apply { putString(SONG_EXTRA, it) } })
+                                .setExtras(songBundle(song, songArt))
                                 .build()
                         )
                         .build()
@@ -844,6 +854,7 @@ class PlaybackService : MediaLibraryService() {
         val p = ChannelPrefs.read(this)
         val all = ChannelPrefs.applyOrder(base, p)
         allChannels = all
+        scope.launch { syncNowPlaying() }   // 채널 설정이 재생보다 늦게 도착한 경우 (설정이 바뀌었을 수도 있음)
         prefetchRemoteLogos(all)
         return all.filter { it.id !in p.hidden }
     }
@@ -937,6 +948,72 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    // ---------------- 실시간 선곡 정보 (채널 설정의 nowPlaying가 있는 방송) ----------------
+
+    /** 채널 ID → 선곡 정보의 앨범아트 주소 (있을 때만) */
+    private val songArts = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private var nowPlayingJob: Job? = null
+    private var nowPlayingChannelId: String? = null
+
+    /**
+     * 지금 재생 중인 채널만 30초마다 선곡 정보를 조회. 재생 정지·선곡 미지원 채널이면 중단.
+     * 재생 상태 변화(정지·채널 변경·설정 도착)마다 호출하며, 같은 채널이 이미 돌고 있으면 그대로 둠
+     */
+    private fun syncNowPlaying() {
+        val exo = exoPlayer ?: return
+        val template = ChannelRepository.nowPlayingUrl
+        val ch = if (exo.playWhenReady) allChannels.firstOrNull { it.id == exo.currentMediaItem?.mediaId } else null
+        val npId = ch?.nowPlaying
+        if (ch == null || npId == null || template == null) {
+            nowPlayingJob?.cancel()
+            nowPlayingJob = null
+            nowPlayingChannelId = null
+            return
+        }
+        if (nowPlayingChannelId == ch.id && nowPlayingJob?.isActive == true) return
+        nowPlayingJob?.cancel()
+        nowPlayingChannelId = ch.id
+        Log.i("KRadio", "선곡 정보 조회 시작: ${ch.id}")
+        nowPlayingJob = scope.launch {
+            var last: NowPlaying? = null   // 실패하면 마지막 성공값으로 계속 판정
+            while (isActive) {
+                // 폴링은 선곡 정보 부가 기능이라 어떤 실패도 재생에 영향 주지 않음 (fetch는 null만 돌려줌)
+                NowPlayingRepository.fetch(template, npId)?.let { last = it }
+                applyNowPlaying(ch.id, last)
+                delay(NOW_PLAYING_POLL_MS)
+            }
+        }
+    }
+
+    /** 선곡 정보를 표시용 곡 제목·앨범아트로 바꿔 반영. 지금 곡이 아니면 "방금 나온 곡"으로 구분 */
+    private suspend fun applyNowPlaying(channelId: String, np: NowPlaying?) {
+        // 조회 중에 채널이 바뀌었거나 멈췄으면 버림
+        if (nowPlayingChannelId != channelId || exoPlayer?.currentMediaItem?.mediaId != channelId) return
+        var art: String? = null
+        val text = when (val st = NowPlayingRepository.songState(np, System.currentTimeMillis())) {
+            is SongState.Playing -> {
+                art = st.track.albumArtUrl
+                songText(st.track)
+            }
+            is SongState.JustPlayed -> {
+                art = st.track.albumArtUrl
+                songText(st.track) + " · 방금 나온 곡"
+            }
+            SongState.None -> null
+        }
+        val oldText = streamSongs[channelId]
+        val oldArt = songArts[channelId]
+        if (text == null) streamSongs.remove(channelId) else streamSongs[channelId] = text
+        if (text == null || art == null) songArts.remove(channelId) else songArts[channelId] = art
+        if (text != oldText || art != oldArt) {
+            Log.i("KRadio", "선곡 정보[$channelId]: ${text ?: "(없음)"}")
+            updateNowPlaying()   // 바뀐 게 없으면 내부에서 갱신 안 함
+        }
+    }
+
+    private fun songText(t: Track): String =
+        if (t.artistName.isNullOrBlank()) t.songTitle else "${t.songTitle} - ${t.artistName}"
+
     /** ICY 원본 바이트에서 StreamTitle 꺼내기. 재생기는 라틴 문자로 풀어서 한글(EUC-KR)이 깨지므로 직접 풂 */
     private fun icySongTitle(raw: ByteArray): String? {
         val text = runCatching {
@@ -994,11 +1071,20 @@ class PlaybackService : MediaLibraryService() {
                 item.mediaMetadata.buildUpon()
                     .setArtist(song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group)
                     .setSubtitle(song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group)
-                    .setExtras(song?.let { android.os.Bundle().apply { putString(SONG_EXTRA, it) } })
+                    .setExtras(songBundle(song, songArts[ch.id]))
                     .build()
             )
             .build()
     }
+
+    /** 곡 제목(·앨범아트 주소)을 항목 extras로. 곡 제목이 없으면 null */
+    private fun songBundle(song: String?, art: String?): android.os.Bundle? =
+        song?.let { s ->
+            android.os.Bundle().apply {
+                putString(SONG_EXTRA, s)
+                art?.let { putString(SONG_ART_EXTRA, it) }
+            }
+        }
 
     /** 재생 목록 전체를 방송 정보까지 채워서 생성 */
     private suspend fun playlistItems(list: List<Channel>, startIdx: Int): List<MediaItem> {

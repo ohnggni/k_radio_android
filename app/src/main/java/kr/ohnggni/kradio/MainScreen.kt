@@ -117,6 +117,7 @@ fun MainScreen(
     isOn: Boolean,
     status: String,
     song: String?,          // 인터넷 방송이 보내 준 지금 곡 제목 (있으면 재생기에 프로그램 대신 표시)
+    songArt: String?,       // 선곡 정보의 앨범아트 주소 (있으면 재생기 로고 자리에 표시)
     enabled: Boolean,
     onChannelClick: (Channel) -> Unit,
     onPlayStop: () -> Unit,
@@ -164,6 +165,7 @@ fun MainScreen(
                 ch = current,
                 program = epg?.display(current?.epg, now),
                 song = song,
+                songArt = songArt,
                 isOn = isOn,
                 status = status,
                 enabled = enabled,
@@ -593,6 +595,7 @@ private fun PlayerBar(
     ch: Channel?,
     program: Program?,
     song: String?,
+    songArt: String?,
     isOn: Boolean,
     status: String,
     enabled: Boolean,
@@ -686,7 +689,8 @@ private fun PlayerBar(
                     .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ChannelLogo(ch?.logo, ch?.name ?: "K", Modifier.size(56.dp))
+                // 선곡 정보에 앨범아트가 있으면 로고 자리에 앨범아트 (없으면 채널 로고)
+                ChannelLogo(songArt ?: ch?.logo, ch?.name ?: "K", Modifier.size(56.dp))
                 Spacer(Modifier.width(12.dp))
 
                 // 3줄: 채널명 / 방송 정보 / 재생 상태 (채널명이 폭을 다 쓰도록 상태는 따로 한 줄)
