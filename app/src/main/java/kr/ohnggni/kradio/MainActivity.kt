@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
     private var songArt by mutableStateOf<String?>(null) // 선곡 정보의 앨범아트 주소 (있을 때만)
     private var cover by mutableStateOf<String?>(null)   // 지금 프로그램의 표지 주소 (있을 때만)
     private var host by mutableStateOf<String?>(null)    // 지금 프로그램의 진행자 (표지 데이터 기준)
+    private var songSpan by mutableStateOf<Pair<Long, Long>?>(null)   // 지금 곡 시작·끝 (선곡 정보)
     private var recent by mutableStateOf<List<String>>(emptyList())  // 방금 나온 곡 "HH:mm\t곡명\t가수"
 
     private var screen by mutableStateOf(Screen.MAIN)
@@ -246,6 +247,7 @@ class MainActivity : ComponentActivity() {
                             cover = cover,
                             host = host,
                             recent = recent,
+                            songSpan = songSpan,
                             enabled = controller != null,
                             onChannelClick = { playChannel(it) },
                             onPlayStop = { playStop() },
@@ -410,6 +412,7 @@ class MainActivity : ComponentActivity() {
             cover = c.mediaMetadata.extras?.getString(COVER_EXTRA)
             host = c.mediaMetadata.extras?.getString(HOST_EXTRA)
             recent = c.mediaMetadata.extras?.getStringArrayList(RECENT_EXTRA) ?: emptyList()
+            songSpan = spanOf(c.mediaMetadata.extras)
             c.addListener(object : Player.Listener {
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                     song = mediaMetadata.extras?.getString(SONG_EXTRA)
@@ -417,6 +420,7 @@ class MainActivity : ComponentActivity() {
                     cover = mediaMetadata.extras?.getString(COVER_EXTRA)
                     host = mediaMetadata.extras?.getString(HOST_EXTRA)
                     recent = mediaMetadata.extras?.getStringArrayList(RECENT_EXTRA) ?: emptyList()
+                    songSpan = spanOf(mediaMetadata.extras)
                 }
                 override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                     isOn = playWhenReady
@@ -756,4 +760,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+/** 항목 extras의 곡 시작·끝 시각 (없으면 null) */
+private fun spanOf(b: android.os.Bundle?): Pair<Long, Long>? {
+    val s = b?.getLong(SONG_START_EXTRA, 0L) ?: 0L
+    val e = b?.getLong(SONG_END_EXTRA, 0L) ?: 0L
+    return if (s > 0 && e > s) s to e else null
 }

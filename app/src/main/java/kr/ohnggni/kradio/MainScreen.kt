@@ -3,6 +3,9 @@ package kr.ohnggni.kradio
 import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.delay
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalDensity
@@ -131,6 +134,7 @@ fun MainScreen(
     cover: String?,         // 지금 프로그램의 표지 주소 (곡이 없을 때 재생기 로고 자리에 표시)
     host: String?,          // 지금 프로그램의 진행자 (대형 재생기)
     recent: List<String>,   // 방금 나온 곡 "HH:mm\t곡명\t가수" (대형 재생기)
+    songSpan: Pair<Long, Long>?,   // 지금 곡 시작·끝 (대형 재생기 진행 막대)
     enabled: Boolean,
     onChannelClick: (Channel) -> Unit,
     onPlayStop: () -> Unit,
@@ -167,6 +171,7 @@ fun MainScreen(
             cover = cover,
             host = host,
             recent = recent,
+            songSpan = songSpan,
             isOn = isOn,
             status = status,
             enabled = enabled,
@@ -819,8 +824,9 @@ private fun PlayerBar(
     }
 }
 /**
- * 대형 재생기 (시안 B): 프로그램 표지·진행자 + 지금 곡 + 방금 나온 곡 + 조작.
- * 닫기: 위 ⌄ 버튼, 뒤로 가기, 위쪽(표지)을 아래로 쓸어내리기
+ * 대형 재생기: 정사각 표지(위에 채널 배지, 왼쪽 아래 프로그램 정보) + 지금 곡·진행 막대 +
+ * 방금 나온 곡(스크롤) + 조작 + 음량.
+ * 닫기: 위 ⌄ 버튼, 뒤로 가기, 표지를 아래로 쓸어내리기
  */
 @Composable
 private fun BigPlayer(
@@ -831,6 +837,7 @@ private fun BigPlayer(
     cover: String?,
     host: String?,
     recent: List<String>,
+    songSpan: Pair<Long, Long>?,
     isOn: Boolean,
     status: String,
     enabled: Boolean,
@@ -856,6 +863,11 @@ private fun BigPlayer(
         val cs = MaterialTheme.colorScheme
         val density = LocalDensity.current
         var drag by remember { mutableFloatStateOf(0f) }
+        // 진행 막대·남은 시간용 시계 (화면이 열려 있을 때만 1초마다)
+        val clock by produceState(System.currentTimeMillis()) {
+            while (true) { delay(1_000L); value = System.currentTimeMillis() }
+        }
+        val hm = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.KOREA) }
         Surface(Modifier.fillMaxSize(), color = cs.surface) {
             Column(
                 Modifier
@@ -864,7 +876,7 @@ private fun BigPlayer(
                     .navigationBarsPadding()
                     .padding(horizontal = 20.dp)
             ) {
-                // ---------- 위: 닫기 + 채널명 + 표지 (여기를 아래로 쓸면 닫힘) ----------
+                // ---------- 위: 닫기 + 시각 + 표지 (여기를 아래로 쓸면 닫힘) ----------
                 Column(
                     Modifier.pointerInput(Unit) {
                         detectVerticalDragGestures(
@@ -878,72 +890,54 @@ private fun BigPlayer(
                             Icon(IconChevronDown, contentDescription = "큰 재생기 닫기", modifier = Modifier.size(28.dp))
                         }
                         Text(
-                            ch.name,
+                            hm.format(java.util.Date(clock)),
                             style = MaterialTheme.typography.titleSmall,
                             color = cs.onSurfaceVariant,
                             textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
                         Spacer(Modifier.width(48.dp))   // 닫기 버튼과 균형
                     }
-                    // 표지는 제각각 비율이라 가로로 넓게 잘라서 (없으면 채널 로고)
-                    ChannelLogo(
-                        cover ?: ch.logo, ch.name,
-                        Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-                        fallback = ch.logo
-                    )
+                    BigCover(ch, program, host, cover, clock)
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(14.dp))
 
-                // ---------- 프로그램 ----------
-                Text(
-                    program?.title ?: ch.name,
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                val time = program?.let {
-                    val f = java.text.SimpleDateFormat("HH:mm", java.util.Locale.KOREA)
-                    "${f.format(java.util.Date(it.start))}–${f.format(java.util.Date(it.stop))}"
-                }
-                val info = listOfNotNull(host?.let { "진행 $it" }, time).joinToString(" · ")
-                if (info.isNotEmpty()) {
-                    Text(info, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Spacer(Modifier.height(16.dp))
-
-                // ---------- 지금 곡 ----------
+                // ---------- 지금 곡 + 진행 막대 ----------
                 if (song != null) {
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .background(cs.surfaceVariant, RoundedCornerShape(12.dp))
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         ChannelLogo(songArt ?: cover ?: ch.logo, ch.name, Modifier.size(52.dp), fallback = ch.logo)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("♪ $song", style = MaterialTheme.typography.titleSmall, maxLines = 1,
-                                modifier = songMarquee(true))
+                            Text(song, style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = songMarquee(true))
                             Text("지금 나오는 곡", style = MaterialTheme.typography.labelSmall, color = cs.primary)
                         }
+                        Spacer(Modifier.width(8.dp))
+                        SoundBars(isOn, cs.primary)
                     }
-                    Spacer(Modifier.height(12.dp))
+                    songSpan?.let { (s, e) ->
+                        val f = ((clock - s).toFloat() / (e - s)).coerceIn(0f, 1f)
+                        Spacer(Modifier.height(10.dp))
+                        Box(Modifier.fillMaxWidth().height(4.dp).background(cs.surfaceVariant, RoundedCornerShape(2.dp))) {
+                            Box(Modifier.fillMaxWidth(f).height(4.dp).background(cs.primary, RoundedCornerShape(2.dp)))
+                        }
+                        Row(Modifier.fillMaxWidth().padding(top = 3.dp)) {
+                            Text(mmss(clock - s), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                            Spacer(Modifier.weight(1f))
+                            Text(mmss(e - s), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
                 }
 
-                // ---------- 방금 나온 곡 ----------
-                Column(Modifier.weight(1f)) {
+                // ---------- 방금 나온 곡 (남는 공간에서 스크롤) ----------
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                     if (recent.isNotEmpty()) {
                         Text("방금 나온 곡", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-                        Spacer(Modifier.height(6.dp))
                         recent.forEach { line ->
                             val p = line.split('\t')
                             val title = p.getOrNull(1).orEmpty()
                             val artist = p.getOrNull(2).orEmpty()
-                            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     if (artist.isEmpty()) title else "$title · $artist",
                                     style = MaterialTheme.typography.bodyMedium,
@@ -958,21 +952,16 @@ private fun BigPlayer(
                     }
                 }
 
-                // ---------- 상태 ----------
-                val stateLabel = status.ifEmpty { if (isOn) "재생 중" else "정지됨" }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    if (isOn && status.isEmpty()) {
-                        Box(Modifier.size(7.dp).background(PlayingGreen, CircleShape))
-                        Spacer(Modifier.width(5.dp))
-                    }
-                    Text(
-                        listOfNotNull(stateLabel, sleepAt?.let { sleepRemainLabel(it, now) }).joinToString(" · "),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (isOn) cs.primary else cs.onSurfaceVariant,
-                        maxLines = 1
-                    )
+                // ---------- 상태 (재생 중이 아니거나 꺼짐 예약이 있을 때만) ----------
+                val extra = listOfNotNull(
+                    status.ifEmpty { if (!isOn) "정지됨" else null },
+                    sleepAt?.let { sleepRemainLabel(it, now) }
+                ).joinToString(" · ")
+                if (extra.isNotEmpty()) {
+                    Text(extra, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant,
+                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
 
                 // ---------- 조작 ----------
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
@@ -982,17 +971,17 @@ private fun BigPlayer(
                     FilledIconButton(
                         onClick = onPlayStop,
                         enabled = enabled,
-                        modifier = Modifier.size(76.dp),
+                        modifier = Modifier.size(72.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary)
                     ) {
                         Icon(if (isOn) IconStop else IconPlay, contentDescription = if (isOn) "정지" else "재생",
-                            modifier = Modifier.size(42.dp))
+                            modifier = Modifier.size(40.dp))
                     }
                     IconButton(onClick = onNext, enabled = enabled, modifier = Modifier.size(64.dp)) {
                         Icon(IconNext, contentDescription = "다음 채널", modifier = Modifier.size(40.dp))
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
 
                 // ---------- 음량 (하단 재생기와 같은 규칙) ----------
                 val sysMode = volumeSync && !carMode
@@ -1029,6 +1018,129 @@ private fun BigPlayer(
             }
         }
     }
+}
+
+/** "m:ss" (음수는 0) */
+private fun mmss(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
+}
+
+/**
+ * 큰 재생기 정사각 표지: 표지 사진 > 채널 로고(가운데, 원래 비율) > 채널명 글자 배너.
+ * 왼쪽 위에 채널 배지, 왼쪽 아래에 프로그램명·진행자·시간·남은 시간
+ */
+@Composable
+private fun BigCover(ch: Channel, program: Program?, host: String?, cover: String?, clock: Long) {
+    val context = LocalContext.current
+    val coverBmp by produceState(cover?.let { LogoCache.peek(it) }, cover) {
+        value = cover?.let { LogoCache.get(context, it) }
+    }
+    val logoBmp by produceState(ch.logo?.let { LogoCache.peek(it) }, ch.logo) {
+        value = ch.logo?.let { LogoCache.get(context, it) }
+    }
+    val tint = bannerColor(ch.name)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(16.dp))
+            .background(tint)
+    ) {
+        val c = coverBmp
+        val l = logoBmp
+        when {
+            c != null -> Image(c, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            l != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                // 작은 로고를 늘려 흐려지지 않게 가운데 흰 카드에 원래 비율로
+                Box(
+                    Modifier.fillMaxWidth(0.5f).aspectRatio(1f)
+                        .background(Color.White, RoundedCornerShape(20.dp)).padding(18.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(l, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                }
+            }
+            else -> NameBanner(ch.name)
+        }
+        // 글자가 사진 위에서도 읽히게 아래쪽을 어둡게
+        Box(
+            Modifier.fillMaxWidth().fillMaxHeight(0.45f).align(Alignment.BottomStart)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))))
+        )
+        // 왼쪽 위 채널 배지
+        Row(
+            Modifier.align(Alignment.TopStart).padding(10.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(50))
+                .padding(start = 4.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(22.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                if (l != null) Image(l, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(18.dp))
+                else Text(ch.name.take(1), color = tint, fontWeight = FontWeight.Black, fontSize = 12.sp)
+            }
+            Spacer(Modifier.width(6.dp))
+            Text(ch.name, color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        }
+        // 왼쪽 아래 프로그램 정보
+        Column(Modifier.align(Alignment.BottomStart).padding(14.dp)) {
+            Text(
+                program?.title ?: ch.name,
+                color = Color.White,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            val time = program?.let {
+                val f = java.text.SimpleDateFormat("HH:mm", java.util.Locale.KOREA)
+                val left = ((it.stop - clock) / 60_000L).coerceAtLeast(0)
+                "${f.format(java.util.Date(it.start))}–${f.format(java.util.Date(it.stop))}" +
+                    if (left in 1..59) " · ${left}분 남음" else ""
+            }
+            val info = listOfNotNull(host, time).joinToString(" · ")
+            if (info.isNotEmpty()) {
+                Text(info, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** 로고가 없을 때: 채널명으로 만든 굵은 글자 배너 (영문은 배너 로고 글꼴, 한글은 시스템 굵은 글꼴) */
+@Composable
+private fun NameBanner(name: String) {
+    val words = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    BoxWithConstraints(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
+        val longest = words.maxOfOrNull { it.length } ?: 1
+        // 가장 긴 단어가 폭의 80% 안에 들어오게 글자 크기 결정 (한 글자 폭 ≈ 0.62em)
+        val sizeDp = (maxWidth * 0.8f / (longest * 0.62f)).coerceAtMost(maxWidth / 2.2f).coerceAtLeast(28.dp)
+        val fs = with(LocalDensity.current) { sizeDp.toSp() }
+        val latin = name.all { it.code < 128 }
+        Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth().padding(bottom = 40.dp)) {
+            words.forEach { w ->
+                Text(
+                    w,
+                    color = Color.White,
+                    fontSize = fs,
+                    lineHeight = fs * 1.02f,
+                    fontFamily = if (latin) LogoFont else null,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = (-1).sp,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+    }
+}
+
+/** 채널명마다 고정된 진한 배경색 (이름 해시로 고름) */
+private fun bannerColor(name: String): Color {
+    val palette = listOf(
+        0xFF534AB7, 0xFF0F6E56, 0xFF993C1D, 0xFF993556, 0xFF185FA5, 0xFF3B6D11, 0xFF854F0B, 0xFF5F5E5A
+    )
+    return Color(palette[Math.floorMod(name.hashCode(), palette.size)])
 }
 
 /** 재생기 음량 슬라이더: 손잡이를 동그랗게 키우고 터치 영역을 넓힘 */
