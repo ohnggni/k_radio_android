@@ -873,6 +873,9 @@ object LogoCache {
                     return@runCatching download(context, base + path.substringAfterLast('/'))
                 }
                 download(context, url)
+            }.onFailure {
+                // 진단: 그림을 못 받은 이유 (주소는 앞부분만)
+                android.util.Log.w("KRadio", "그림 받기 실패: ${url.take(60)} - ${it.message}")
             }.getOrNull()?.also { memory[url] = it }
         }
 

@@ -966,8 +966,17 @@ class PlaybackService : MediaLibraryService() {
     /** 지금 프로그램의 표지 주소. 선곡 정보 채널 체계(nowPlaying)가 있는 채널만 */
     private fun coverFor(ch: Channel, program: Program?): String? {
         val id = ch.nowPlaying ?: return null
-        return CoverRepository.find(id, listOf(npPrograms[ch.id], program?.title))?.image
+        val np = npPrograms[ch.id]
+        val found = CoverRepository.find(id, listOf(np, program?.title))
+        // 진단: 재생 중 채널의 표지 판단이 바뀔 때만 한 줄
+        if (ch.id == exoPlayer?.currentMediaItem?.mediaId) {
+            val line = "${ch.id}: ${found?.let { "${it.title} → ${if (it.image != null) "표지" else "그림 없음"}" } ?: "못 찾음"}" +
+                " (선곡=${np ?: "-"}, 편성표=${program?.title ?: "-"}, 데이터=${CoverRepository.size}개)"
+            if (line != lastCoverLog) { lastCoverLog = line; Log.i("KRadio", "표지 판단 $line") }
+        }
+        return found?.image
     }
+    @Volatile private var lastCoverLog: String? = null
 
     /** 표지 데이터 확인 (하루 지났으면 새로 받음). 바뀌었으면 방송 정보 다시 채움 */
     private fun refreshCovers() {

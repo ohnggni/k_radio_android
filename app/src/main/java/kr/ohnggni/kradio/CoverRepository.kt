@@ -41,12 +41,16 @@ object CoverRepository {
     @Volatile private var fetchedAt = 0L              // 마지막으로 새로 받은 시각
     @Volatile private var triedAt = 0L                // 마지막으로 받으러 가 본 시각
 
+    /** 메모리에 있는 프로그램 수 (진단용) */
+    val size: Int get() = byChannel.values.sumOf { it.size }
+
     /**
      * 필요하면 저장본을 읽고, 하루가 지났으면 새로 받음. 메모리 데이터가 바뀌었으면 true.
      * url이 null이면(설정에 없음) 기능을 끔
      */
     suspend fun ensure(context: Context, url: String?): Boolean = mutex.withLock {
         if (url == null) {
+            if (loadedFrom != null) Log.i("KRadio", "표지 기능 꺼짐 (설정에 주소 없음)")
             val had = byChannel.isNotEmpty()
             byChannel = emptyMap(); loadedFrom = null
             return@withLock had
@@ -63,6 +67,7 @@ object CoverRepository {
                         loadedFrom = url
                         fetchedAt = cache.lastModified()
                         changed = true
+                        Log.i("KRadio", "표지 저장본 읽음: ${size}개 프로그램")
                     }
                 }.onFailure { Log.w("KRadio", "표지 저장본 읽기 실패: ${it.message}") }
             }
