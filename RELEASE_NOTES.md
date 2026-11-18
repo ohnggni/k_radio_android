@@ -4,6 +4,19 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.14.0 (Unreleased)
+
+### Added
+- Program cover images: for supported channels the player shows the current program's cover image when no song is playing (album cover while a song is playing, channel logo if neither is available).
+- **Data:** new optional top-level fields `coverUrl` (encrypted program data, refreshed by the server twice a day), `nowPlayingPollSeconds` (minimum 30) and `nowPlayingUserAgent`.
+
+### Technical
+- Program data is downloaded at most once a day (retry after 30 minutes on failure) and kept as a local copy; failures are silent.
+- The current program is matched by the song service's program title first, then by the program guide title (brackets, spaces and symbols ignored; partial matches only for unique titles of 4+ characters), then by the regular air times.
+- Large images are downsampled when loaded; broken image files are re-downloaded.
+
+---
+
 ## 1.13.0 (2026-11-18)
 
 ### Added

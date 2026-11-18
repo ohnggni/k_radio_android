@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private var status by mutableStateOf("채널 목록 불러오는 중...")
     private var song by mutableStateOf<String?>(null)   // 인터넷 방송이 보내 준 지금 곡 제목
     private var songArt by mutableStateOf<String?>(null) // 선곡 정보의 앨범아트 주소 (있을 때만)
+    private var cover by mutableStateOf<String?>(null)   // 지금 프로그램의 표지 주소 (있을 때만)
 
     private var screen by mutableStateOf(Screen.MAIN)
     private var warning by mutableStateOf<String?>(null)
@@ -240,6 +241,7 @@ class MainActivity : ComponentActivity() {
                             status = status,
                             song = song,
                             songArt = songArt,
+                            cover = cover,
                             enabled = controller != null,
                             onChannelClick = { playChannel(it) },
                             onPlayStop = { playStop() },
@@ -401,10 +403,12 @@ class MainActivity : ComponentActivity() {
             currentId = c.currentMediaItem?.mediaId
             song = c.mediaMetadata.extras?.getString(SONG_EXTRA)
             songArt = c.mediaMetadata.extras?.getString(SONG_ART_EXTRA)
+            cover = c.mediaMetadata.extras?.getString(COVER_EXTRA)
             c.addListener(object : Player.Listener {
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                     song = mediaMetadata.extras?.getString(SONG_EXTRA)
                     songArt = mediaMetadata.extras?.getString(SONG_ART_EXTRA)
+                    cover = mediaMetadata.extras?.getString(COVER_EXTRA)
                 }
                 override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                     isOn = playWhenReady

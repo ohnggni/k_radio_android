@@ -72,7 +72,8 @@ private const val SCHEME = "kradio"
 internal const val SONG_EXTRA = "kradio.song"
 /** 선곡 정보가 있으면 앨범아트 주소 (앱 화면이 읽음) */
 internal const val SONG_ART_EXTRA = "kradio.songart"
-private const val NOW_PLAYING_POLL_MS = 30_000L  // 선곡 정보 조회 주기 (이보다 짧게 하지 않음)
+/** 지금 프로그램의 표지 주소 (앱 화면이 읽음) */
+internal const val COVER_EXTRA = "kradio.cover"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
 private const val MAX_RETRY_DELAY_MS = 30_000L       // 재연결 최대 대기 간격
 
@@ -270,7 +271,9 @@ class PlaybackService : MediaLibraryService() {
                 mediaItem?.mediaId?.let { prefs.edit().putString("last_channel", it).apply() }
                 // 곡 제목은 지금 듣는 채널 것만. 앱에서 채널을 누르면 재생 목록을 새로 만들어서
                 // 전환 사유가 PLAYLIST_CHANGED로 오므로, 사유가 아니라 채널 ID로 판단
-                if (streamSongs.keys.retainAll(setOfNotNull(mediaItem?.mediaId))) {
+                val keep = setOfNotNull(mediaItem?.mediaId)
+                val progGone = npPrograms.keys.retainAll(keep)   // 선곡 정보 프로그램명도 지금 채널 것만
+                if (streamSongs.keys.retainAll(keep) || progGone) {
                     songArts.keys.retainAll(streamSongs.keys)
                     scope.launch { updateNowPlaying() }   // 다른 채널 항목에 남은 곡 제목 표시도 지움
                 }
@@ -330,9 +333,10 @@ class PlaybackService : MediaLibraryService() {
                     // 사용자가 정지하면 재연결 중단 + 정지 시각 기록 (다음 실행 시 자동 재생 판단용)
                     cancelRetry()
                     fadeJob?.cancel()
-                    if (streamSongs.isNotEmpty()) {   // 멈추면 곡 제목도 지움 (다시 틀면 방송이 새로 보내 줌)
+                    if (streamSongs.isNotEmpty() || npPrograms.isNotEmpty()) {   // 멈추면 곡 제목도 지움 (다시 틀면 방송이 새로 보내 줌)
                         streamSongs.clear()
                         songArts.clear()
+                        npPrograms.clear()
                         scope.launch { updateNowPlaying() }
                     }
                     pausedAt = System.currentTimeMillis()
@@ -449,6 +453,7 @@ class PlaybackService : MediaLibraryService() {
         // 매분 정각마다 현재 방송 정보 갱신
         nowPlayingJob = scope.launch {
             while (true) {
+                refreshCovers()   // 하루 지났을 때만 실제로 받음
                 updateNowPlaying()
                 val now = System.currentTimeMillis()
                 delay(60_000L - now % 60_000L + 1_000L)
@@ -781,6 +786,7 @@ class PlaybackService : MediaLibraryService() {
                 // 인터넷 방송이 곡 제목을 보내 주면 프로그램 대신 곡 제목 (알림·잠금화면·오토·위젯·워치)
                 val song = streamSongs[ch.id]
                 val songArt = songArts[ch.id]
+                val cover = coverFor(ch, program)
                 val artist = song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group
                 val subtitle = song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group
                 // 항목에는 로고 주소만. 재생 중 채널의 그림 데이터는 nowPlayingMeta()가 내보낼 때 붙임
@@ -791,7 +797,8 @@ class PlaybackService : MediaLibraryService() {
                     cur.subtitle?.toString() == subtitle && cur.displayTitle?.toString() == ch.name &&
                     cur.artworkUri == wantArt && cur.artworkData == null &&
                     cur.extras?.getString(SONG_EXTRA) == song &&
-                    cur.extras?.getString(SONG_ART_EXTRA) == songArt) {
+                    cur.extras?.getString(SONG_ART_EXTRA) == songArt &&
+                    cur.extras?.getString(COVER_EXTRA) == cover) {
                     item
                 } else {
                     changed = true
@@ -804,7 +811,7 @@ class PlaybackService : MediaLibraryService() {
                                 .setSubtitle(subtitle)
                                 .setArtworkUri(wantArt)
                                 .setArtworkData(null, null)
-                                .setExtras(songBundle(song, songArt))
+                                .setExtras(songBundle(song, songArt, cover))
                                 .build()
                         )
                         .build()
@@ -855,6 +862,7 @@ class PlaybackService : MediaLibraryService() {
         val all = ChannelPrefs.applyOrder(base, p)
         allChannels = all
         scope.launch { syncNowPlaying() }   // 채널 설정이 재생보다 늦게 도착한 경우 (설정이 바뀌었을 수도 있음)
+        refreshCovers()
         prefetchRemoteLogos(all)
         return all.filter { it.id !in p.hidden }
     }
@@ -952,6 +960,21 @@ class PlaybackService : MediaLibraryService() {
 
     /** 채널 ID → 선곡 정보의 앨범아트 주소 (있을 때만) */
     private val songArts = java.util.concurrent.ConcurrentHashMap<String, String>()
+    /** 채널 ID → 선곡 정보의 프로그램명 (재생 중 채널만) */
+    private val npPrograms = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** 지금 프로그램의 표지 주소. 선곡 정보 채널 체계(nowPlaying)가 있는 채널만 */
+    private fun coverFor(ch: Channel, program: Program?): String? {
+        val id = ch.nowPlaying ?: return null
+        return CoverRepository.find(id, listOf(npPrograms[ch.id], program?.title))?.image
+    }
+
+    /** 표지 데이터 확인 (하루 지났으면 새로 받음). 바뀌었으면 방송 정보 다시 채움 */
+    private fun refreshCovers() {
+        scope.launch {
+            if (CoverRepository.ensure(this@PlaybackService, ChannelRepository.coverUrl)) updateNowPlaying()
+        }
+    }
     private var songPollJob: Job? = null
     private var nowPlayingChannelId: String? = null
 
@@ -981,8 +1004,9 @@ class PlaybackService : MediaLibraryService() {
                 val now = System.currentTimeMillis()
                 // 받기는 30초마다만. 폴링은 부가 기능이라 어떤 실패도 재생에 영향 주지 않음 (fetch는 null만 돌려줌)
                 if (now >= nextFetch) {
-                    NowPlayingRepository.fetch(template, npId)?.let { last = it }
-                    nextFetch = System.currentTimeMillis() + NOW_PLAYING_POLL_MS
+                    NowPlayingRepository.fetch(template, npId, ChannelRepository.nowPlayingUserAgent)?.let { last = it }
+                    // 주기는 설정값(30초 미만은 30초로 올림)
+                    nextFetch = System.currentTimeMillis() + ChannelRepository.nowPlayingPollSeconds * 1000L
                 }
                 applyNowPlaying(ch.id, last)
                 // 곡이 끝나는 시각이 다음 받기보다 먼저면 그때 한 번 더 판정 (받지 않고 표시만 프로그램으로 되돌림)
@@ -997,6 +1021,10 @@ class PlaybackService : MediaLibraryService() {
     private suspend fun applyNowPlaying(channelId: String, np: NowPlaying?) {
         // 조회 중에 채널이 바뀌었거나 멈췄으면 버림
         if (nowPlayingChannelId != channelId || exoPlayer?.currentMediaItem?.mediaId != channelId) return
+        // 선곡 정보의 프로그램명 (실제 송출 기준이라 표지 찾을 때 편성표보다 먼저 씀)
+        val prog = np?.programTitle
+        val oldProg = npPrograms[channelId]
+        if (prog == null) npPrograms.remove(channelId) else npPrograms[channelId] = prog
         var art: String? = null
         val text = when (val st = NowPlayingRepository.songState(np, System.currentTimeMillis())) {
             is SongState.Playing -> {
@@ -1009,7 +1037,7 @@ class PlaybackService : MediaLibraryService() {
         val oldArt = songArts[channelId]
         if (text == null) streamSongs.remove(channelId) else streamSongs[channelId] = text
         if (text == null || art == null) songArts.remove(channelId) else songArts[channelId] = art
-        if (text != oldText || art != oldArt) {
+        if (text != oldText || art != oldArt || prog != oldProg) {
             Log.i("KRadio", "선곡 정보[$channelId]: ${text ?: "(없음)"}")
             updateNowPlaying()   // 바뀐 게 없으면 내부에서 갱신 안 함
         }
@@ -1075,19 +1103,19 @@ class PlaybackService : MediaLibraryService() {
                 item.mediaMetadata.buildUpon()
                     .setArtist(song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group)
                     .setSubtitle(song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group)
-                    .setExtras(songBundle(song, songArts[ch.id]))
+                    .setExtras(songBundle(song, songArts[ch.id], coverFor(ch, program)))
                     .build()
             )
             .build()
     }
 
-    /** 곡 제목(·앨범아트 주소)을 항목 extras로. 곡 제목이 없으면 null */
-    private fun songBundle(song: String?, art: String?): android.os.Bundle? =
-        song?.let { s ->
-            android.os.Bundle().apply {
-                putString(SONG_EXTRA, s)
-                art?.let { putString(SONG_ART_EXTRA, it) }
-            }
+    /** 곡 제목·앨범아트·프로그램 표지 주소를 항목 extras로. 전부 없으면 null */
+    private fun songBundle(song: String?, art: String?, cover: String?): android.os.Bundle? =
+        if (song == null && cover == null) null
+        else android.os.Bundle().apply {
+            song?.let { putString(SONG_EXTRA, it) }
+            if (song != null) art?.let { putString(SONG_ART_EXTRA, it) }
+            cover?.let { putString(COVER_EXTRA, it) }
         }
 
     /** 재생 목록 전체를 방송 정보까지 채워서 생성 */

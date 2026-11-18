@@ -38,6 +38,18 @@ object ChannelRepository {
     @Volatile var nowPlayingUrl: String? = null
         private set
 
+    /** 선곡 정보 조회 주기(초, 30 미만은 30) */
+    @Volatile var nowPlayingPollSeconds: Int = 30
+        private set
+
+    /** 선곡 정보 조회 때 보낼 User-Agent (없으면 기본값) */
+    @Volatile var nowPlayingUserAgent: String? = null
+        private set
+
+    /** 프로그램 표지 데이터 암호문 주소 (없으면 표지 기능 끔) */
+    @Volatile var coverUrl: String? = null
+        private set
+
     /** 설정 파일의 logoBase (내장 로고가 없을 때만 예비로 사용) */
     @Volatile var logoBase: String? = null
         private set
@@ -160,6 +172,9 @@ object ChannelRepository {
         epgUrl = root.optString("epgUrl").ifEmpty { null }
         logoBase = root.optString("logoBase").ifEmpty { null }
         nowPlayingUrl = root.optString("nowPlayingUrl").ifEmpty { null }
+        nowPlayingPollSeconds = root.optInt("nowPlayingPollSeconds", 30).coerceAtLeast(30)
+        nowPlayingUserAgent = root.optString("nowPlayingUserAgent").ifEmpty { null }
+        coverUrl = root.optString("coverUrl").ifEmpty { null }
         latestVersionCode = root.optLong("latestVersionCode", 0L).takeIf { it > 0 }
         latestVersionName = root.optString("latestVersionName").ifEmpty { null }
         updateUrl = root.optString("updateUrl").ifEmpty { null }

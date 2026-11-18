@@ -43,9 +43,10 @@ sealed class SongState {
 object NowPlayingRepository {
 
     /** 채널의 선곡 정보를 한 번 조회. 실패하면 null */
-    suspend fun fetch(urlTemplate: String, id: String): NowPlaying? = withContext(Dispatchers.IO) {
+    suspend fun fetch(urlTemplate: String, id: String, userAgent: String?): NowPlaying? = withContext(Dispatchers.IO) {
         try {
-            val body = ChannelRepository.httpGet(urlTemplate.replace("{id}", id), emptyMap(), timeoutMs = 8_000)
+            val headers = userAgent?.let { mapOf("User-Agent" to it) } ?: emptyMap()
+            val body = ChannelRepository.httpGet(urlTemplate.replace("{id}", id), headers, timeoutMs = 8_000)
             parse(body)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

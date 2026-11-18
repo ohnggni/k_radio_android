@@ -119,6 +119,7 @@ fun MainScreen(
     status: String,
     song: String?,          // 인터넷 방송이 보내 준 지금 곡 제목 (있으면 재생기에 프로그램 대신 표시)
     songArt: String?,       // 선곡 정보의 앨범아트 주소 (있으면 재생기 로고 자리에 표시)
+    cover: String?,         // 지금 프로그램의 표지 주소 (곡이 없을 때 재생기 로고 자리에 표시)
     enabled: Boolean,
     onChannelClick: (Channel) -> Unit,
     onPlayStop: () -> Unit,
@@ -167,6 +168,7 @@ fun MainScreen(
                 program = epg?.display(current?.epg, now),
                 song = song,
                 songArt = songArt,
+                cover = cover,
                 isOn = isOn,
                 status = status,
                 enabled = enabled,
@@ -599,6 +601,7 @@ private fun PlayerBar(
     program: Program?,
     song: String?,
     songArt: String?,
+    cover: String?,
     isOn: Boolean,
     status: String,
     enabled: Boolean,
@@ -692,8 +695,8 @@ private fun PlayerBar(
                     .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 선곡 정보에 앨범아트가 있으면 로고 자리에 앨범아트 (없으면 채널 로고)
-                ChannelLogo(songArt ?: ch?.logo, ch?.name ?: "K", Modifier.size(56.dp))
+                // 그림 우선순위: 앨범아트(곡 재생 중) > 프로그램 표지 > 채널 로고
+                ChannelLogo(songArt ?: cover ?: ch?.logo, ch?.name ?: "K", Modifier.size(56.dp), fallback = ch?.logo)
                 Spacer(Modifier.width(12.dp))
 
                 // 3줄: 채널명 / 방송 정보 / 재생 상태 (채널명이 폭을 다 쓰도록 상태는 따로 한 줄)
@@ -817,10 +820,13 @@ private fun songMarquee(on: Boolean): Modifier =
     if (on) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1_500) else Modifier
 
 @Composable
-fun ChannelLogo(url: String?, name: String, modifier: Modifier = Modifier) {
+fun ChannelLogo(url: String?, name: String, modifier: Modifier = Modifier, fallback: String? = null) {
     val context = LocalContext.current
-    val bmp by produceState<ImageBitmap?>(initialValue = null, url) {
-        value = url?.let { LogoCache.get(context, it) }
+    // url(앨범아트·표지)을 못 받으면 fallback(채널 로고). 받는 동안엔 이미 받아 둔 그림을 바로 보여줌
+    val bmp by produceState(
+        initialValue = url?.let { LogoCache.peek(it) } ?: fallback?.let { LogoCache.peek(it) }, url, fallback
+    ) {
+        value = url?.let { LogoCache.get(context, it) } ?: fallback?.let { LogoCache.get(context, it) }
     }
     Box(
         modifier
@@ -848,6 +854,10 @@ object LogoCache {
     const val ASSET_PREFIX = "asset:///"
 
     private val memory = ConcurrentHashMap<String, ImageBitmap>()
+    private const val MAX_SIDE = 512   // 표지 원본이 커도 이 크기 근처로 줄여서 읽음
+
+    /** 이미 메모리에 있는 그림만 (네트워크·파일 안 읽음) */
+    fun peek(url: String): ImageBitmap? = memory[url]
 
     suspend fun get(context: Context, url: String): ImageBitmap? =
         memory[url] ?: withContext(Dispatchers.IO) {
@@ -881,7 +891,13 @@ object LogoCache {
             }
             tmp.renameTo(file)
         }
-        return BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_SIDE) sample *= 2
+        val bmp = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+        if (bmp == null) file.delete()   // 깨진 파일이면 다음에 다시 받게
+        return bmp?.asImageBitmap()
     }
 }
 
