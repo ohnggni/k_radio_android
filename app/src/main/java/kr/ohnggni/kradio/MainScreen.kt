@@ -869,13 +869,18 @@ private fun BigPlayer(
         }
         val hm = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.KOREA) }
         Surface(Modifier.fillMaxSize(), color = cs.surface) {
-            Column(
+          BoxWithConstraints(
                 Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(horizontal = 20.dp)
-            ) {
+          ) {
+            // 재생 버튼·음량 위치가 곡 유무와 상관없이 고정되도록 아래 칸들은 높이를 고정하고,
+            // 표지는 남는 높이 안에서 정사각으로 (폴드 바깥 화면처럼 세로가 짧으면 작아짐)
+            val fixedBelow = 48.dp + 14.dp + BIG_SONG_H + BIG_RECENT_MIN + BIG_STATUS_H + BIG_CONTROLS_H + BIG_VOLUME_H
+            val side = minOf(maxWidth, maxHeight - fixedBelow).coerceAtLeast(160.dp)
+            Column(Modifier.fillMaxSize()) {
                 // ---------- 위: 닫기 + 시각 + 표지 (여기를 아래로 쓸면 닫힘) ----------
                 Column(
                     Modifier.pointerInput(Unit) {
@@ -898,11 +903,14 @@ private fun BigPlayer(
                         )
                         Spacer(Modifier.width(48.dp))   // 닫기 버튼과 균형
                     }
-                    BigCover(ch, program, host, cover, clock)
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        BigCover(ch, program, host, cover, clock, Modifier.size(side))
+                    }
                 }
                 Spacer(Modifier.height(14.dp))
 
-                // ---------- 지금 곡 + 진행 막대 ----------
+                // ---------- 지금 곡 + 진행 막대 (곡이 없어도 자리는 차지) ----------
+                Column(Modifier.fillMaxWidth().height(BIG_SONG_H)) {
                 if (song != null) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         ChannelLogo(songArt ?: cover ?: ch.logo, ch.name, Modifier.size(52.dp), fallback = ch.logo)
@@ -926,11 +934,11 @@ private fun BigPlayer(
                             Text(mmss(e - s), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                         }
                     }
-                    Spacer(Modifier.height(10.dp))
+                }
                 }
 
                 // ---------- 방금 나온 곡 (남는 공간에서 스크롤) ----------
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                     if (recent.isNotEmpty()) {
                         Text("방금 나온 곡", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
                         recent.forEach { line ->
@@ -957,14 +965,14 @@ private fun BigPlayer(
                     status.ifEmpty { if (!isOn) "정지됨" else null },
                     sleepAt?.let { sleepRemainLabel(it, now) }
                 ).joinToString(" · ")
-                if (extra.isNotEmpty()) {
-                    Text(extra, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant,
-                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                Box(Modifier.fillMaxWidth().height(BIG_STATUS_H), contentAlignment = Alignment.Center) {
+                    if (extra.isNotEmpty()) {
+                        Text(extra, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant, maxLines = 1)
+                    }
                 }
-                Spacer(Modifier.height(8.dp))
 
                 // ---------- 조작 ----------
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().height(BIG_CONTROLS_H), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onPrev, enabled = enabled, modifier = Modifier.size(64.dp)) {
                         Icon(IconPrev, contentDescription = "이전 채널", modifier = Modifier.size(40.dp))
                     }
@@ -981,12 +989,11 @@ private fun BigPlayer(
                         Icon(IconNext, contentDescription = "다음 채널", modifier = Modifier.size(40.dp))
                     }
                 }
-                Spacer(Modifier.height(6.dp))
 
                 // ---------- 음량 (하단 재생기와 같은 규칙) ----------
                 val sysMode = volumeSync && !carMode
                 val muted = if (sysMode) sysVol == 0 else appVolume == 0
-                Row(Modifier.fillMaxWidth().systemGestureExclusion().padding(bottom = 12.dp),
+                Row(Modifier.fillMaxWidth().height(BIG_VOLUME_H).systemGestureExclusion().padding(bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onToggleMute, modifier = Modifier.size(40.dp)) {
                         Icon(if (muted) IconVolumeOff else IconVolume,
@@ -1016,9 +1023,17 @@ private fun BigPlayer(
                     )
                 }
             }
+          }
         }
     }
 }
+
+// 큰 재생기 칸 높이 (재생 버튼·음량 위치 고정용)
+private val BIG_SONG_H = 100.dp
+private val BIG_RECENT_MIN = 72.dp
+private val BIG_STATUS_H = 24.dp
+private val BIG_CONTROLS_H = 84.dp
+private val BIG_VOLUME_H = 56.dp
 
 /** "m:ss" (음수는 0) */
 private fun mmss(ms: Long): String {
@@ -1031,7 +1046,7 @@ private fun mmss(ms: Long): String {
  * 왼쪽 위에 채널 배지, 왼쪽 아래에 프로그램명·진행자·시간·남은 시간
  */
 @Composable
-private fun BigCover(ch: Channel, program: Program?, host: String?, cover: String?, clock: Long) {
+private fun BigCover(ch: Channel, program: Program?, host: String?, cover: String?, clock: Long, modifier: Modifier) {
     val context = LocalContext.current
     val coverBmp by produceState(cover?.let { LogoCache.peek(it) }, cover) {
         value = cover?.let { LogoCache.get(context, it) }
@@ -1041,9 +1056,7 @@ private fun BigCover(ch: Channel, program: Program?, host: String?, cover: Strin
     }
     val tint = bannerColor(ch.name)
     Box(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
+        modifier
             .clip(RoundedCornerShape(16.dp))
             .background(tint)
     ) {
@@ -1098,7 +1111,7 @@ private fun BigCover(ch: Channel, program: Program?, host: String?, cover: Strin
                 "${f.format(java.util.Date(it.start))}–${f.format(java.util.Date(it.stop))}" +
                     if (left in 1..59) " · ${left}분 남음" else ""
             }
-            val info = listOfNotNull(host, time).joinToString(" · ")
+            val info = listOfNotNull(time, host).joinToString(" · ")   // 진행자가 길면 뒤에서 잘리게 시간 먼저
             if (info.isNotEmpty()) {
                 Text(info, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
