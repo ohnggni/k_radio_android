@@ -3,6 +3,15 @@ package kr.ohnggni.kradio
 import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
@@ -120,6 +129,8 @@ fun MainScreen(
     song: String?,          // 인터넷 방송이 보내 준 지금 곡 제목 (있으면 재생기에 프로그램 대신 표시)
     songArt: String?,       // 선곡 정보의 앨범아트 주소 (있으면 재생기 로고 자리에 표시)
     cover: String?,         // 지금 프로그램의 표지 주소 (곡이 없을 때 재생기 로고 자리에 표시)
+    host: String?,          // 지금 프로그램의 진행자 (대형 재생기)
+    recent: List<String>,   // 방금 나온 곡 "HH:mm\t곡명\t가수" (대형 재생기)
     enabled: Boolean,
     onChannelClick: (Channel) -> Unit,
     onPlayStop: () -> Unit,
@@ -145,6 +156,36 @@ fun MainScreen(
     onOpenSchedules: () -> Unit,
 ) {
     val current = channels.firstOrNull { it.id == currentId }
+    // 대형 재생기: 하단 재생기의 빈 곳(로고·글자)을 누르면 열림
+    var big by rememberSaveable { mutableStateOf(false) }
+    if (big && current != null) {
+        BigPlayer(
+            ch = current,
+            program = epg?.display(current.epg, now),
+            song = song,
+            songArt = songArt,
+            cover = cover,
+            host = host,
+            recent = recent,
+            isOn = isOn,
+            status = status,
+            enabled = enabled,
+            now = now,
+            sleepAt = sleepAt,
+            onPlayStop = onPlayStop,
+            onPrev = onPrev,
+            onNext = onNext,
+            appVolume = appVolume,
+            volumeSync = volumeSync,
+            sysVol = sysVol,
+            sysMax = sysMax,
+            onAppVolume = onAppVolume,
+            onSysVolume = onSysVolume,
+            onToggleMute = onToggleMute,
+            carMode = carMode,
+            onClose = { big = false },
+        )
+    }
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -186,6 +227,7 @@ fun MainScreen(
                 onToggleSync = onToggleSync,
                 onToggleMute = onToggleMute,
                 carMode = carMode,
+                onOpenBig = { if (current != null) big = true },
             )
         }
     ) { inner ->
@@ -619,6 +661,7 @@ private fun PlayerBar(
     onToggleSync: (Boolean) -> Unit,
     onToggleMute: () -> Unit,
     carMode: Boolean,   // 안드로이드 오토 연결 중: 폰 음량은 차 소리와 무관 → 앱 음량만
+    onOpenBig: () -> Unit,
 ) {
     val container = MaterialTheme.colorScheme.primaryContainer
     val onContainer = MaterialTheme.colorScheme.onPrimaryContainer
@@ -692,6 +735,7 @@ private fun PlayerBar(
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .clickable(onClickLabel = "큰 재생기 열기", onClick = onOpenBig)   // 버튼 말고 빈 곳을 누르면 대형 재생기
                     .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -774,6 +818,219 @@ private fun PlayerBar(
         }
     }
 }
+/**
+ * 대형 재생기 (시안 B): 프로그램 표지·진행자 + 지금 곡 + 방금 나온 곡 + 조작.
+ * 닫기: 위 ⌄ 버튼, 뒤로 가기, 위쪽(표지)을 아래로 쓸어내리기
+ */
+@Composable
+private fun BigPlayer(
+    ch: Channel,
+    program: Program?,
+    song: String?,
+    songArt: String?,
+    cover: String?,
+    host: String?,
+    recent: List<String>,
+    isOn: Boolean,
+    status: String,
+    enabled: Boolean,
+    now: Long,
+    sleepAt: Long?,
+    onPlayStop: () -> Unit,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    appVolume: Int,
+    volumeSync: Boolean,
+    sysVol: Int,
+    sysMax: Int,
+    onAppVolume: (Int) -> Unit,
+    onSysVolume: (Int) -> Unit,
+    onToggleMute: () -> Unit,
+    carMode: Boolean,
+    onClose: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        val cs = MaterialTheme.colorScheme
+        val density = LocalDensity.current
+        var drag by remember { mutableFloatStateOf(0f) }
+        Surface(Modifier.fillMaxSize(), color = cs.surface) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+            ) {
+                // ---------- 위: 닫기 + 채널명 + 표지 (여기를 아래로 쓸면 닫힘) ----------
+                Column(
+                    Modifier.pointerInput(Unit) {
+                        detectVerticalDragGestures(
+                            onDragStart = { drag = 0f },
+                            onDragEnd = { if (drag > with(density) { 120.dp.toPx() }) onClose() },
+                        ) { _, dy -> drag += dy }
+                    }
+                ) {
+                    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onClose) {
+                            Icon(IconChevronDown, contentDescription = "큰 재생기 닫기", modifier = Modifier.size(28.dp))
+                        }
+                        Text(
+                            ch.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = cs.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(48.dp))   // 닫기 버튼과 균형
+                    }
+                    // 표지는 제각각 비율이라 가로로 넓게 잘라서 (없으면 채널 로고)
+                    ChannelLogo(
+                        cover ?: ch.logo, ch.name,
+                        Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                        fallback = ch.logo
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+
+                // ---------- 프로그램 ----------
+                Text(
+                    program?.title ?: ch.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val time = program?.let {
+                    val f = java.text.SimpleDateFormat("HH:mm", java.util.Locale.KOREA)
+                    "${f.format(java.util.Date(it.start))}–${f.format(java.util.Date(it.stop))}"
+                }
+                val info = listOfNotNull(host?.let { "진행 $it" }, time).joinToString(" · ")
+                if (info.isNotEmpty()) {
+                    Text(info, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(16.dp))
+
+                // ---------- 지금 곡 ----------
+                if (song != null) {
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .background(cs.surfaceVariant, RoundedCornerShape(12.dp))
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ChannelLogo(songArt ?: cover ?: ch.logo, ch.name, Modifier.size(52.dp), fallback = ch.logo)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("♪ $song", style = MaterialTheme.typography.titleSmall, maxLines = 1,
+                                modifier = songMarquee(true))
+                            Text("지금 나오는 곡", style = MaterialTheme.typography.labelSmall, color = cs.primary)
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                // ---------- 방금 나온 곡 ----------
+                Column(Modifier.weight(1f)) {
+                    if (recent.isNotEmpty()) {
+                        Text("방금 나온 곡", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                        Spacer(Modifier.height(6.dp))
+                        recent.forEach { line ->
+                            val p = line.split('\t')
+                            val title = p.getOrNull(1).orEmpty()
+                            val artist = p.getOrNull(2).orEmpty()
+                            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (artist.isEmpty()) title else "$title · $artist",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(p.getOrNull(0).orEmpty(), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+
+                // ---------- 상태 ----------
+                val stateLabel = status.ifEmpty { if (isOn) "재생 중" else "정지됨" }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    if (isOn && status.isEmpty()) {
+                        Box(Modifier.size(7.dp).background(PlayingGreen, CircleShape))
+                        Spacer(Modifier.width(5.dp))
+                    }
+                    Text(
+                        listOfNotNull(stateLabel, sleepAt?.let { sleepRemainLabel(it, now) }).joinToString(" · "),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (isOn) cs.primary else cs.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+
+                // ---------- 조작 ----------
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onPrev, enabled = enabled, modifier = Modifier.size(64.dp)) {
+                        Icon(IconPrev, contentDescription = "이전 채널", modifier = Modifier.size(40.dp))
+                    }
+                    FilledIconButton(
+                        onClick = onPlayStop,
+                        enabled = enabled,
+                        modifier = Modifier.size(76.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary)
+                    ) {
+                        Icon(if (isOn) IconStop else IconPlay, contentDescription = if (isOn) "정지" else "재생",
+                            modifier = Modifier.size(42.dp))
+                    }
+                    IconButton(onClick = onNext, enabled = enabled, modifier = Modifier.size(64.dp)) {
+                        Icon(IconNext, contentDescription = "다음 채널", modifier = Modifier.size(40.dp))
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+
+                // ---------- 음량 (하단 재생기와 같은 규칙) ----------
+                val sysMode = volumeSync && !carMode
+                val muted = if (sysMode) sysVol == 0 else appVolume == 0
+                Row(Modifier.fillMaxWidth().systemGestureExclusion().padding(bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onToggleMute, modifier = Modifier.size(40.dp)) {
+                        Icon(if (muted) IconVolumeOff else IconVolume,
+                            contentDescription = if (muted) "음소거 해제" else "음소거", modifier = Modifier.size(22.dp))
+                    }
+                    if (sysMode) {
+                        VolumeSlider(
+                            value = sysVol.toFloat(),
+                            onValueChange = { onSysVolume(it.roundToInt()) },
+                            valueRange = 0f..sysMax.coerceAtLeast(1).toFloat(),
+                            steps = (sysMax - 1).coerceAtLeast(0),
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else {
+                        VolumeSlider(
+                            value = appVolume.toFloat(),
+                            onValueChange = { onAppVolume((it / 5).roundToInt() * 5) },
+                            valueRange = AppVolume.MIN.toFloat()..AppVolume.MAX.toFloat(),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Text(
+                        if (sysMode) "${if (sysMax > 0) sysVol * 100 / sysMax else 0}%" else "${appVolume}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.width(48.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** 재생기 음량 슬라이더: 손잡이를 동그랗게 키우고 터치 영역을 넓힘 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -916,6 +1173,7 @@ internal fun svgIcon(name: String, d: String): ImageVector =
     ).addPath(pathData = addPathNodes(d), fill = SolidColor(Color.Black)).build()
 
 private val IconPlay = svgIcon("play", "M8,5v14l11,-7z")
+private val IconChevronDown = svgIcon("chevdown", "M7.41,8.59L12,13.17l4.59,-4.58L18,10l-6,6 -6,-6z")
 private val IconStop = svgIcon("stop", "M6,6h12v12H6z")
 private val IconPrev = svgIcon("prev", "M6,6h2v12H6zM9.5,12l8.5,6V6z")
 private val IconNext = svgIcon("next", "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z")

@@ -8,6 +8,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ### Added
 - Program cover images: for supported channels the player shows the current program's cover image when no song is playing (album cover while a song is playing, channel logo if neither is available).
+- Full-screen player: tap the empty area of the bottom player (logo or text) to open it. It shows the program cover, host and air time, the song playing now, and the songs played just before, with large playback buttons and the volume slider. Close it with the arrow at the top, the back gesture, or by swiping down on the cover.
 - **Data:** new optional top-level fields `coverUrl` (encrypted program data, refreshed by the server twice a day), `nowPlayingPollSeconds` (minimum 30) and `nowPlayingUserAgent`.
 
 ### Technical

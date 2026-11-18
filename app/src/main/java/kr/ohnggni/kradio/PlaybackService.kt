@@ -74,6 +74,10 @@ internal const val SONG_EXTRA = "kradio.song"
 internal const val SONG_ART_EXTRA = "kradio.songart"
 /** 지금 프로그램의 표지 주소 (앱 화면이 읽음) */
 internal const val COVER_EXTRA = "kradio.cover"
+/** 지금 프로그램의 진행자 (표지 데이터 기준, 앱 화면이 읽음) */
+internal const val HOST_EXTRA = "kradio.host"
+/** 방금 나온 곡 목록 "HH:mm\t곡명\t가수" (선곡 정보, 재생 중 채널만, 앱 화면이 읽음) */
+internal const val RECENT_EXTRA = "kradio.recent"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
 private const val MAX_RETRY_DELAY_MS = 30_000L       // 재연결 최대 대기 간격
 
@@ -272,7 +276,7 @@ class PlaybackService : MediaLibraryService() {
                 // 곡 제목은 지금 듣는 채널 것만. 앱에서 채널을 누르면 재생 목록을 새로 만들어서
                 // 전환 사유가 PLAYLIST_CHANGED로 오므로, 사유가 아니라 채널 ID로 판단
                 val keep = setOfNotNull(mediaItem?.mediaId)
-                val progGone = npPrograms.keys.retainAll(keep)   // 선곡 정보 프로그램명도 지금 채널 것만
+                val progGone = npPrograms.keys.retainAll(keep) or recents.keys.retainAll(keep)   // 선곡 정보 프로그램명·최근 곡도 지금 채널 것만
                 if (streamSongs.keys.retainAll(keep) || progGone) {
                     songArts.keys.retainAll(streamSongs.keys)
                     scope.launch { updateNowPlaying() }   // 다른 채널 항목에 남은 곡 제목 표시도 지움
@@ -333,10 +337,11 @@ class PlaybackService : MediaLibraryService() {
                     // 사용자가 정지하면 재연결 중단 + 정지 시각 기록 (다음 실행 시 자동 재생 판단용)
                     cancelRetry()
                     fadeJob?.cancel()
-                    if (streamSongs.isNotEmpty() || npPrograms.isNotEmpty()) {   // 멈추면 곡 제목도 지움 (다시 틀면 방송이 새로 보내 줌)
+                    if (streamSongs.isNotEmpty() || npPrograms.isNotEmpty() || recents.isNotEmpty()) {   // 멈추면 곡 제목도 지움 (다시 틀면 방송이 새로 보내 줌)
                         streamSongs.clear()
                         songArts.clear()
                         npPrograms.clear()
+                        recents.clear()
                         scope.launch { updateNowPlaying() }
                     }
                     pausedAt = System.currentTimeMillis()
@@ -786,7 +791,10 @@ class PlaybackService : MediaLibraryService() {
                 // 인터넷 방송이 곡 제목을 보내 주면 프로그램 대신 곡 제목 (알림·잠금화면·오토·위젯·워치)
                 val song = streamSongs[ch.id]
                 val songArt = songArts[ch.id]
-                val cover = coverFor(ch, program)
+                val cp = coverProgram(ch, program)
+                val cover = cp?.image
+                val host = cp?.persons?.takeIf { it.isNotEmpty() }?.joinToString(", ")
+                val rec = recents[ch.id]
                 val artist = song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group
                 val subtitle = song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group
                 // 항목에는 로고 주소만. 재생 중 채널의 그림 데이터는 nowPlayingMeta()가 내보낼 때 붙임
@@ -798,7 +806,9 @@ class PlaybackService : MediaLibraryService() {
                     cur.artworkUri == wantArt && cur.artworkData == null &&
                     cur.extras?.getString(SONG_EXTRA) == song &&
                     cur.extras?.getString(SONG_ART_EXTRA) == songArt &&
-                    cur.extras?.getString(COVER_EXTRA) == cover) {
+                    cur.extras?.getString(COVER_EXTRA) == cover &&
+                    cur.extras?.getString(HOST_EXTRA) == host &&
+                    cur.extras?.getStringArrayList(RECENT_EXTRA) == rec) {
                     item
                 } else {
                     changed = true
@@ -811,7 +821,7 @@ class PlaybackService : MediaLibraryService() {
                                 .setSubtitle(subtitle)
                                 .setArtworkUri(wantArt)
                                 .setArtworkData(null, null)
-                                .setExtras(songBundle(song, songArt, cover))
+                                .setExtras(songBundle(song, songArt, cover, host, rec))
                                 .build()
                         )
                         .build()
@@ -962,9 +972,13 @@ class PlaybackService : MediaLibraryService() {
     private val songArts = java.util.concurrent.ConcurrentHashMap<String, String>()
     /** 채널 ID → 선곡 정보의 프로그램명 (재생 중 채널만) */
     private val npPrograms = java.util.concurrent.ConcurrentHashMap<String, String>()
+    /** 채널 ID → 방금 나온 곡 목록 (재생 중 채널만) */
+    private val recents = java.util.concurrent.ConcurrentHashMap<String, ArrayList<String>>()
 
     /** 지금 프로그램의 표지 주소. 선곡 정보 채널 체계(nowPlaying)가 있는 채널만 */
-    private fun coverFor(ch: Channel, program: Program?): String? {
+    private fun coverFor(ch: Channel, program: Program?): String? = coverProgram(ch, program)?.image
+
+    private fun coverProgram(ch: Channel, program: Program?): CoverProgram? {
         val id = ch.nowPlaying ?: return null
         val np = npPrograms[ch.id]
         val found = CoverRepository.find(id, listOf(np, program?.title))
@@ -974,7 +988,7 @@ class PlaybackService : MediaLibraryService() {
                 " (선곡=${np ?: "-"}, 편성표=${program?.title ?: "-"}, 데이터=${CoverRepository.size}개)"
             if (line != lastCoverLog) { lastCoverLog = line; Log.i("KRadio", "표지 판단 $line") }
         }
-        return found?.image
+        return found
     }
     @Volatile private var lastCoverLog: String? = null
 
@@ -1042,11 +1056,22 @@ class PlaybackService : MediaLibraryService() {
             }
             is SongState.JustPlayed, SongState.None -> null
         }
+        // 방금 나온 곡: 지금 나오는 곡(위에 따로 표시)·시그널 곡은 빼고 최근 5곡
+        val hm = SimpleDateFormat("HH:mm", Locale.KOREA)
+        val playingId = (NowPlayingRepository.songState(np, System.currentTimeMillis()) as? SongState.Playing)?.track?.trackId
+        val rec = ArrayList(
+            (if (np?.provided == true) np.recentTracks else emptyList())
+                .filter { it.trackId != playingId && !NowPlayingRepository.isPlaceholder(it.songTitle) }
+                .take(5)
+                .map { "${hm.format(Date(it.playedAt))}\t${it.songTitle}\t${it.artistName ?: ""}" }
+        )
+        val oldRec = recents[channelId]
+        if (rec.isEmpty()) recents.remove(channelId) else recents[channelId] = rec
         val oldText = streamSongs[channelId]
         val oldArt = songArts[channelId]
         if (text == null) streamSongs.remove(channelId) else streamSongs[channelId] = text
         if (text == null || art == null) songArts.remove(channelId) else songArts[channelId] = art
-        if (text != oldText || art != oldArt || prog != oldProg) {
+        if (text != oldText || art != oldArt || prog != oldProg || rec != (oldRec ?: emptyList<String>())) {
             Log.i("KRadio", "선곡 정보[$channelId]: ${text ?: "(없음)"}")
             updateNowPlaying()   // 바뀐 게 없으면 내부에서 갱신 안 함
         }
@@ -1112,19 +1137,26 @@ class PlaybackService : MediaLibraryService() {
                 item.mediaMetadata.buildUpon()
                     .setArtist(song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group)
                     .setSubtitle(song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group)
-                    .setExtras(songBundle(song, songArts[ch.id], coverFor(ch, program)))
+                    .setExtras(coverProgram(ch, program).let { cp ->
+                        songBundle(song, songArts[ch.id], cp?.image,
+                            cp?.persons?.takeIf { it.isNotEmpty() }?.joinToString(", "), recents[ch.id])
+                    })
                     .build()
             )
             .build()
     }
 
     /** 곡 제목·앨범아트·프로그램 표지 주소를 항목 extras로. 전부 없으면 null */
-    private fun songBundle(song: String?, art: String?, cover: String?): android.os.Bundle? =
-        if (song == null && cover == null) null
+    private fun songBundle(
+        song: String?, art: String?, cover: String?, host: String?, recent: ArrayList<String>?,
+    ): android.os.Bundle? =
+        if (song == null && cover == null && host == null && recent == null) null
         else android.os.Bundle().apply {
             song?.let { putString(SONG_EXTRA, it) }
             if (song != null) art?.let { putString(SONG_ART_EXTRA, it) }
             cover?.let { putString(COVER_EXTRA, it) }
+            host?.let { putString(HOST_EXTRA, it) }
+            recent?.let { putStringArrayList(RECENT_EXTRA, it) }
         }
 
     /** 재생 목록 전체를 방송 정보까지 채워서 생성 */
