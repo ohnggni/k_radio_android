@@ -26,6 +26,7 @@ data class Channel(
     val epg: String? = null,          // 편성표(XMLTV) 채널 아이디
     val logo: String? = null,         // 로고 (asset:///logos/... 또는 인터넷 주소)
     val nowPlaying: String? = null,   // 실시간 선곡 정보 채널 ID (없으면 선곡 정보 기능 끔)
+    val cover: String? = null,        // 프로그램 표지 채널 ID (없으면 nowPlaying 값 사용. 선곡은 없고 표지만 있는 방송용)
 )
 
 object ChannelRepository {
@@ -204,6 +205,7 @@ object ChannelRepository {
                 epg = o.optString("epg").ifEmpty { null },
                 logo = logo,
                 nowPlaying = o.optString("nowPlaying").ifEmpty { null },
+                cover = o.optString("cover").ifEmpty { null },
             )
         }
         epgIds = list.mapNotNull { it.epg }.toSet()

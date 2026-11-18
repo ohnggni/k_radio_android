@@ -988,7 +988,7 @@ class PlaybackService : MediaLibraryService() {
     private fun coverFor(ch: Channel, program: Program?): String? = coverProgram(ch, program)?.image
 
     private fun coverProgram(ch: Channel, program: Program?): CoverProgram? {
-        val id = ch.nowPlaying ?: return null
+        val id = ch.cover ?: ch.nowPlaying ?: return null
         val np = npPrograms[ch.id]
         val found = CoverRepository.find(id, listOf(np, program?.title))
         // 진단: 재생 중 채널의 표지 판단이 바뀔 때만 한 줄

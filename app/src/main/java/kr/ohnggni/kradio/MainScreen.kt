@@ -3,6 +3,8 @@ package kr.ohnggni.kradio
 import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -1200,29 +1202,39 @@ private fun BigCover(
     }
 }
 
-/** 로고가 없을 때: 채널명으로 만든 굵은 글자 배너 (영문은 배너 로고 글꼴, 한글은 시스템 굵은 글꼴) */
+/**
+ * 로고가 없을 때: 채널명으로 만든 굵은 글자 배너 (영문은 배너 로고 글꼴, 한글은 시스템 굵은 글꼴).
+ * 실제 글자 폭을 재서 가장 긴 단어가 폭에, 전체 줄이 높이에 들어가는 가장 큰 크기로
+ */
 @Composable
 private fun NameBanner(name: String) {
-    val words = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    BoxWithConstraints(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
-        val longest = words.maxOfOrNull { it.length } ?: 1
-        // 가장 긴 단어가 폭의 80% 안에 들어오게 글자 크기 결정 (한 글자 폭 ≈ 0.62em)
-        val sizeDp = (maxWidth * 0.8f / (longest * 0.62f)).coerceAtMost(maxWidth / 2.2f).coerceAtLeast(28.dp)
-        val fs = with(LocalDensity.current) { sizeDp.toSp() }
-        val latin = name.all { it.code < 128 }
-        Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth().padding(bottom = 40.dp)) {
+    val words = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.ifEmpty { listOf("K") }
+    val latin = name.all { it.code < 128 }
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxSize().padding(start = 22.dp, end = 22.dp, top = 56.dp, bottom = 22.dp)) {
+        val wPx = with(density) { maxWidth.toPx() }
+        val hPx = with(density) { maxHeight.toPx() }
+        fun style(sp: Float) = TextStyle(
+            fontSize = sp.sp, lineHeight = (sp * 1.08f).sp,
+            fontFamily = if (latin) LogoFont else null, fontWeight = FontWeight.Black,
+            letterSpacing = (-0.02f * sp).sp,
+        )
+        // 맞는 크기 찾기 (이분 탐색, sp 단위)
+        val fitSp = remember(name, wPx, hPx) {
+            var lo = 12f; var hi = 160f
+            repeat(14) {
+                val mid = (lo + hi) / 2
+                val st = style(mid)
+                val widest = words.maxOf { measurer.measure(it, st, maxLines = 1, softWrap = false).size.width }
+                val total = words.size * with(density) { (mid * 1.08f).sp.toPx() }
+                if (widest <= wPx && total <= hPx) lo = mid else hi = mid
+            }
+            lo
+        }
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
             words.forEach { w ->
-                Text(
-                    w,
-                    color = Color.White,
-                    fontSize = fs,
-                    lineHeight = fs * 1.02f,
-                    fontFamily = if (latin) LogoFont else null,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = (-1).sp,
-                    maxLines = 1,
-                    softWrap = false
-                )
+                Text(w, color = Color.White, style = style(fitSp), maxLines = 1, softWrap = false)
             }
         }
     }
