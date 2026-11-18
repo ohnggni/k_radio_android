@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.14.0 (Unreleased)
+## 1.14.0 (2026-11-19)
 
 ### Added
 - Program cover images: for supported channels the player shows the current program's cover image when no song is playing (album cover while a song is playing, channel logo if neither is available).
