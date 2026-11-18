@@ -4,6 +4,16 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.15.0 (Unreleased)
+
+### Added
+- The program cover is now shown in the notification, on the lock screen, on the Android Auto playback screen and on the watch (channel logo when there is no cover). Album covers stay in the app only, so the picture changes only when the program changes.
+
+### Technical
+- Covers are downsized to 512 px JPEG before being attached to the media session (the originals can be over 1 MB), cached in app storage (up to 80 files), and only used once ready, so the Auto background changes once instead of logo → cover. Only the playing channel's cover is prepared. Failures keep the logo and retry after 30 minutes.
+
+---
+
 ## 1.14.0 (2026-11-19)
 
 ### Added

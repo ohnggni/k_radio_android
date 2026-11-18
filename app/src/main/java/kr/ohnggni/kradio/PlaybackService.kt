@@ -74,6 +74,8 @@ internal const val SONG_EXTRA = "kradio.song"
 internal const val SONG_ART_EXTRA = "kradio.songart"
 /** 지금 프로그램의 표지 주소 (앱 화면이 읽음) */
 internal const val COVER_EXTRA = "kradio.cover"
+/** 줄인 표지 그림이 준비된 표지 주소 (지금 재생 중 정보에 그림 데이터로 넣을 때 씀, 준비되면 값이 생겨 세션이 다시 읽음) */
+internal const val COVER_ART_EXTRA = "kradio.coverart"
 /** 지금 프로그램의 진행자 (표지 데이터 기준, 앱 화면이 읽음) */
 internal const val HOST_EXTRA = "kradio.host"
 /** 방금 나온 곡 목록 "HH:mm\t곡명\t가수" (선곡 정보, 재생 중 채널만, 앱 화면이 읽음) */
@@ -204,7 +206,9 @@ class PlaybackService : MediaLibraryService() {
     private fun nowPlayingMeta(m: MediaMetadata): MediaMetadata {
         val id = exoPlayer?.currentMediaItem?.mediaId ?: return m
         val ch = allChannels.firstOrNull { it.id == id } ?: return m
-        val data = logoBytes(ch) ?: return m          // 아직 못 받은 인터넷 로고: 주소 그대로
+        // 프로그램 표지(줄여 둔 것)가 있으면 그걸, 없으면 채널 로고 (앨범아트는 앱 화면에만)
+        val data = m.extras?.getString(COVER_ART_EXTRA)?.let { CoverArt.bytes(this, it) }
+            ?: logoBytes(ch) ?: return m          // 아직 못 받은 인터넷 로고: 주소 그대로
         if (m.artworkUri == null && m.artworkData?.contentEquals(data) == true) return m
         return m.buildUpon()
             .setArtworkData(data, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
@@ -797,6 +801,9 @@ class PlaybackService : MediaLibraryService() {
                 val songArt = songArts[ch.id]
                 val cp = coverProgram(ch, program)
                 val cover = cp?.image
+                // 줄인 표지 그림은 지금 채널만 준비 (다른 채널은 이미 준비된 것만 표시)
+                val coverArt = if (i == exo.currentMediaItemIndex) coverArtFor(cover)
+                               else cover?.takeIf { CoverArt.isReady(this, it) }
                 val host = cp?.persons?.takeIf { it.isNotEmpty() }?.joinToString(", ")
                 val rec = recents[ch.id]
                 val span = if (song != null) songSpans[ch.id] else null
@@ -813,6 +820,7 @@ class PlaybackService : MediaLibraryService() {
                     cur.extras?.getString(SONG_ART_EXTRA) == songArt &&
                     cur.extras?.getString(COVER_EXTRA) == cover &&
                     cur.extras?.getString(HOST_EXTRA) == host &&
+                    cur.extras?.getString(COVER_ART_EXTRA) == coverArt &&
                     cur.extras?.getStringArrayList(RECENT_EXTRA) == rec &&
                     cur.extras?.getLong(SONG_START_EXTRA, 0L) == (span?.get(0) ?: 0L) &&
                     cur.extras?.getLong(SONG_END_EXTRA, 0L) == (span?.get(1) ?: 0L)) {
@@ -828,7 +836,7 @@ class PlaybackService : MediaLibraryService() {
                                 .setSubtitle(subtitle)
                                 .setArtworkUri(wantArt)
                                 .setArtworkData(null, null)
-                                .setExtras(songBundle(song, songArt, cover, host, rec, span))
+                                .setExtras(songBundle(song, songArt, cover, host, rec, span, coverArt))
                                 .build()
                         )
                         .build()
@@ -1153,7 +1161,8 @@ class PlaybackService : MediaLibraryService() {
                     .setExtras(coverProgram(ch, program).let { cp ->
                         songBundle(song, songArts[ch.id], cp?.image,
                             cp?.persons?.takeIf { it.isNotEmpty() }?.joinToString(", "), recents[ch.id],
-                            if (song != null) songSpans[ch.id] else null)
+                            if (song != null) songSpans[ch.id] else null,
+                            cp?.image?.takeIf { CoverArt.isReady(this, it) })
                     })
                     .build()
             )
@@ -1164,6 +1173,7 @@ class PlaybackService : MediaLibraryService() {
     private fun songBundle(
         song: String?, art: String?, cover: String?, host: String?, recent: ArrayList<String>?,
         span: LongArray? = null,
+        coverArt: String? = null,
     ): android.os.Bundle? =
         if (song == null && cover == null && host == null && recent == null) null
         else android.os.Bundle().apply {
@@ -1173,7 +1183,21 @@ class PlaybackService : MediaLibraryService() {
             host?.let { putString(HOST_EXTRA, it) }
             recent?.let { putStringArrayList(RECENT_EXTRA, it) }
             span?.let { putLong(SONG_START_EXTRA, it[0]); putLong(SONG_END_EXTRA, it[1]) }
+            coverArt?.let { putString(COVER_ART_EXTRA, it) }
         }
+
+    /**
+     * 표지 주소 → 줄인 그림이 준비됐으면 그 주소, 아니면 null (로고 유지) + 백그라운드로 준비.
+     * 준비되면 방송 정보를 다시 채워 값이 바뀌고, 세션이 새 그림을 한 번만 읽어 감(오토 배경도 한 번만 바뀜)
+     */
+    private fun coverArtFor(cover: String?): String? {
+        if (cover == null) return null
+        if (CoverArt.isReady(this, cover)) return cover
+        scope.launch {
+            if (CoverArt.prepare(this@PlaybackService, cover)) updateNowPlaying()
+        }
+        return null
+    }
 
     /** 재생 목록 전체를 방송 정보까지 채워서 생성 */
     private suspend fun playlistItems(list: List<Channel>, startIdx: Int): List<MediaItem> {
