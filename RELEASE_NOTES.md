@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.15.0 (Unreleased)
+## 1.15.0 (2026-11-20)
 
 ### Added
 - The program cover is now shown in the notification, on the lock screen, on the Android Auto playback screen and on the watch (channel logo when there is no cover). Album covers stay in the app only, so the picture changes only when the program changes.
