@@ -58,6 +58,7 @@ fun BrowseScreen(
     previewOn: Boolean,                             // 재생 중인지
     previewStatus: String,                          // 연결 중·오류 등 상태 글자
     onPreviewStop: () -> Unit,
+    builtInNames: List<String>,                     // 기본 채널 이름 (한국어 방송에서 같은 방송사 지역국 거르기)
     onBack: () -> Unit,
 ) {
     val previewUrl = preview?.url?.takeIf { previewOn }
@@ -133,7 +134,7 @@ fun BrowseScreen(
                 val chips: List<Pair<String, (() -> BrowseList)?>> = listOf<Pair<String, (() -> BrowseList)?>>(
                     "추천" to null,
                     "K-pop" to { BrowseList("K-pop 방송") { RadioDirectory.search("kpop") } },
-                    "한국어" to { BrowseList("한국어 방송") { RadioDirectory.korean() } },
+                    "한국어" to { BrowseList("한국어 방송") { RadioDirectory.korean(builtInNames) } },
                 ) + cats.map { c ->
                     val label = GENRE_KO[c.name] ?: c.name
                     label to { BrowseList("$label 방송") { RadioDirectory.category(c.id) } }
@@ -158,10 +159,9 @@ fun BrowseScreen(
             val current = list
             if (current == null) {
                 // ---------- 추천 첫 화면 ----------
-                val picks = ChannelRepository.internetPicks
-                if (picks.isNotEmpty()) {
-                    item(key = "@picks") {
-                        StationShelf(ChannelRepository.internetPicksTitle, { Result.success(picks) }, null,
+                ChannelRepository.internetPicks.forEach { (title, picks) ->
+                    item(key = "@picks:$title") {
+                        StationShelf(title, { Result.success(picks) }, null,
                             addedUrls, previewUrl, onAdd, onPreview)
                     }
                 }
@@ -171,8 +171,8 @@ fun BrowseScreen(
                         addedUrls, previewUrl, onAdd, onPreview)
                 }
                 item(key = "@korean") {
-                    StationShelf("한국어 방송", { runCatching { RadioDirectory.korean().take(20) } },
-                        { genre = "한국어"; list = BrowseList("한국어 방송") { RadioDirectory.korean() } },
+                    StationShelf("한국어 방송", { runCatching { RadioDirectory.korean(builtInNames).take(20) } },
+                        { genre = "한국어"; list = BrowseList("한국어 방송") { RadioDirectory.korean(builtInNames) } },
                         addedUrls, previewUrl, onAdd, onPreview)
                 }
                 item(key = "@kpop") {

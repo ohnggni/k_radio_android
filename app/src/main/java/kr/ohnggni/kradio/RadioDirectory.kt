@@ -99,8 +99,17 @@ object RadioDirectory {
     /** 분류 하나의 방송 목록 */
     suspend fun category(id: String): List<WebStation> = browse("$OPML/Browse.ashx?id=${enc(id)}&render=json")
 
-    /** 한국어 방송 (음악·대화 하위 분류까지 따라가서 모음) */
-    suspend fun korean(): List<WebStation> = browse("$OPML/Browse.ashx?c=lang&filter=l180&render=json", follow = 8)
+    /**
+     * 한국어 방송 (음악·대화 하위 분류까지 따라가서 모음).
+     * 앱에 이미 있는 방송사의 지역국·재송출이 잔뜩 섞여 와서, 기본 채널 이름의 첫 단어(방송사명)가 들어간 방송은 뺌
+     */
+    suspend fun korean(builtInNames: List<String> = emptyList()): List<WebStation> {
+        val brands = builtInNames.mapNotNull { it.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { b -> b.length >= 2 } }
+            .map { it.lowercase() }.toSet()
+        return browse("$OPML/Browse.ashx?c=lang&filter=l180&render=json", follow = 8)
+            .filterNot { st -> val n = st.name.lowercase(); brands.any { n.contains(it) } }
+            .distinctBy { it.name.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "") }
+    }
 
     /** 이름 검색 (방송만) */
     suspend fun search(q: String): List<WebStation> =
@@ -179,20 +188,25 @@ object RadioDirectory {
         }
     }
 
-    /** 설정 파일 internetPicks: [{"name","url","logo","tags":"a,b"}] */
-    fun parsePicks(a: JSONArray?): List<WebStation> {
+    /**
+     * 설정 파일 internetPicks: [{"name","url","logo"?,"tags"?,"sub"?,"group"?}]
+     * group이 같은 방송끼리 한 줄 (설정 파일에 처음 나온 순서), group이 없으면 defaultTitle 줄
+     */
+    fun parsePicks(a: JSONArray?, defaultTitle: String): List<Pair<String, List<WebStation>>> {
         if (a == null) return emptyList()
-        return (0 until a.length()).mapNotNull { i ->
-            val o = a.optJSONObject(i) ?: return@mapNotNull null
+        val groups = LinkedHashMap<String, MutableList<WebStation>>()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
             val url = o.optString("url").trim()
             val name = o.optString("name").trim()
-            if (url.isEmpty() || name.isEmpty()) return@mapNotNull null
-            WebStation(
+            if (url.isEmpty() || name.isEmpty()) continue
+            groups.getOrPut(o.optString("group").trim().ifEmpty { defaultTitle }) { mutableListOf() } += WebStation(
                 name = name, url = url,
                 logo = o.optString("logo").trim().ifBlank { null },
-                sub = null,
+                sub = o.optString("sub").trim().ifBlank { null },
                 tag = o.optString("tags").split(',').map { it.trim() }.firstOrNull { it.isNotEmpty() },
             )
         }
+        return groups.map { it.key to it.value.toList() }
     }
 }
