@@ -68,6 +68,8 @@ fun ChannelManageScreen(
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f)
                 )
+                // 채널 추가는 목록 맨 아래에도 있지만, 스크롤하지 않아도 되게 위에도
+                TextButton(onClick = onOpenBrowse) { Text("채널 추가") }
                 TextButton(onClick = { confirmResetAll = true }) { Text("전체 초기화") }
             }
         }

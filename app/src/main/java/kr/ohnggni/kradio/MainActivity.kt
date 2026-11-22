@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
 
     private var screen by mutableStateOf(Screen.MAIN)
     private var browseFrom = Screen.MAIN   // 인터넷 방송 찾기에서 뒤로 가면 돌아갈 화면
+    private var manageFrom = Screen.SETTINGS   // 채널 관리에서 뒤로 가면 돌아갈 화면 (메인 버튼으로 오면 메인)
     private var warning by mutableStateOf<String?>(null)
     private var reloading by mutableStateOf(false)
     private var customConfig by mutableStateOf<String?>(null)
@@ -230,7 +231,7 @@ class MainActivity : ComponentActivity() {
                         Screen.SETTINGS -> Screen.MAIN
                         Screen.SCHEDULE -> Screen.MAIN
                         Screen.BROWSE -> browseFrom
-                        Screen.MANAGE -> Screen.SETTINGS
+                        Screen.MANAGE -> manageFrom
                         else -> Screen.SETTINGS
                     }
                 }
@@ -287,6 +288,7 @@ class MainActivity : ComponentActivity() {
                             hasSchedules = schedules.any { it.enabled },
                             onOpenSchedules = { screen = Screen.SCHEDULE },
                             onOpenBrowse = { browseFrom = Screen.MAIN; screen = Screen.BROWSE },
+                            onOpenManage = { manageFrom = Screen.MAIN; screen = Screen.MANAGE },
                             extra = previewChannel(),
                         )
                         if (showSleep) {
@@ -309,7 +311,7 @@ class MainActivity : ComponentActivity() {
                         epgError = EpgRepository.lastError,
                         reloading = reloading,
                         onBack = { screen = Screen.MAIN },
-                        onOpenManage = { screen = Screen.MANAGE },
+                        onOpenManage = { manageFrom = Screen.SETTINGS; screen = Screen.MANAGE },
                         onOpenGuide = { screen = Screen.GUIDE },
                         onSaveConfig = { url ->
                             SourceSettings.setCustomConfigUrl(this, url)
@@ -353,7 +355,7 @@ class MainActivity : ComponentActivity() {
                         overrides = prefs.overrides,
                         favorites = prefs.favorites,
                         onToggleFavorite = { toggleFavorite(it) },
-                        onBack = { screen = Screen.SETTINGS },
+                        onBack = { screen = manageFrom },
                         onReorder = { ids -> updatePrefs(prefs.copy(order = ids)) },
                         onToggleVisible = { id, visible ->
                             updatePrefs(

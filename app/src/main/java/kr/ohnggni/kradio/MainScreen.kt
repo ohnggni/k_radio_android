@@ -167,6 +167,7 @@ fun MainScreen(
     hasSchedules: Boolean,
     onOpenSchedules: () -> Unit,
     onOpenBrowse: () -> Unit,   // 인터넷 방송 찾기
+    onOpenManage: () -> Unit,   // 채널 관리
     extra: Channel? = null,     // 미리 듣는 인터넷 방송 (채널 목록엔 없지만 재생기에 표시)
 ) {
     val current = channels.firstOrNull { it.id == currentId } ?: extra?.takeIf { it.id == currentId }
@@ -269,9 +270,13 @@ fun MainScreen(
                 // "전체 채널" + 목록/타일 전환
                 item(key = "@head", span = full) {
                     SectionHead("전체 채널", rememberVectorPainter(IconRadio), null, grid) {
-                        IconButton(onClick = onOpenBrowse, modifier = Modifier.size(40.dp)) {
-                            Icon(IconAddChannel, contentDescription = "인터넷 방송 찾기", tint = MaterialTheme.colorScheme.primary,
+                        IconButton(onClick = onOpenManage, modifier = Modifier.size(40.dp)) {
+                            Icon(IconManageChannels, contentDescription = "채널 관리", tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(22.dp))
+                        }
+                        IconButton(onClick = onOpenBrowse, modifier = Modifier.size(40.dp)) {
+                            Icon(IconAddChannel, contentDescription = "인터넷 방송 추가", tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp))
                         }
                         ViewToggle(grid) { onTab(if (grid) ChannelTab.LIST else ChannelTab.GRID) }
                     }
@@ -1449,7 +1454,8 @@ internal fun svgIcon(name: String, d: String): ImageVector =
     ).addPath(pathData = addPathNodes(d), fill = SolidColor(Color.Black)).build()
 
 private val IconPlay = svgIcon("play", "M8,5v14l11,-7z")
-private val IconAddChannel = svgIcon("add_channel", "M19,13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z")
+private val IconAddChannel = svgIcon("add_channel", "M14,10H3v2h11V10zM14,6H3v2h11V6zM18,14v-4h-2v4h-4v2h4v4h2v-4h4v-2H18zM3,16h7v-2H3V16z")   // 목록 + 더하기
+private val IconManageChannels = svgIcon("manage_channels", "M3,17v2h6v-2H3zM3,5v2h10V5H3zM13,21v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zM21,13v-2H11v2h10zM15,9h2V7h4V5h-4V3h-2v6z")   // 조절 막대
 private val IconHistory = svgIcon("history",
     "M13,3a9,9 0,0 0,-9 9H1l3.89,3.89 0.07,0.14L9,12H6c0,-3.87 3.13,-7 7,-7s7,3.13 7,7 -3.13,7 -7,7c-1.93,0 -3.68,-0.79 -4.94,-2.06l-1.42,1.42A8.95,8.95 0,0 0,13 21a9,9 0,0 0,0 -18zM12,8v5l4.28,2.54 0.72,-1.21 -3.5,-2.08V8H12z")
 private val IconChevronDown = svgIcon("chevdown", "M7.41,8.59L12,13.17l4.59,-4.58L18,10l-6,6 -6,-6z")
