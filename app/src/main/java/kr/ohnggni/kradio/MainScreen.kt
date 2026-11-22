@@ -56,6 +56,7 @@ import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -63,6 +64,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -960,7 +962,7 @@ private fun BigPlayer(
 // 큰 재생기 크기 (모든 화면·곡 유무에서 같은 배치가 되도록 고정)
 private val BIG_HEADER_H = 56.dp
 private val BIG_INFO_H = 104.dp
-private val BIG_CONTROLS_H = 84.dp
+private val BIG_CONTROLS_H = 88.dp
 private val BIG_VOLUME_H = 48.dp
 private val BIG_GAP = 16.dp
 private val BIG_BOTTOM_GAP = 28.dp   // 음량 아래 여백 (화면 끝에 붙지 않게)
@@ -1034,20 +1036,22 @@ private fun BigControls(isOn: Boolean, enabled: Boolean, onPrev: () -> Unit, onP
     val cs = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().height(BIG_CONTROLS_H), horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onPrev, enabled = enabled, modifier = Modifier.size(64.dp)) {
-            Icon(IconPrev, contentDescription = "이전 채널", modifier = Modifier.size(40.dp))
+        // 표지가 커서 위가 무거워 보이지 않게 이전·다음은 연한 원 바탕, 재생 버튼은 크게
+        val sideColors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = cs.secondaryContainer, contentColor = cs.onSecondaryContainer)
+        FilledTonalIconButton(onClick = onPrev, enabled = enabled, modifier = Modifier.size(64.dp), colors = sideColors) {
+            Icon(IconPrev, contentDescription = "이전 채널", modifier = Modifier.size(32.dp))
         }
         FilledIconButton(
             onClick = onPlayStop,
             enabled = enabled,
-            modifier = Modifier.size(76.dp),
+            modifier = Modifier.size(88.dp),
             colors = IconButtonDefaults.filledIconButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary)
         ) {
             Icon(if (isOn) IconStop else IconPlay, contentDescription = if (isOn) "정지" else "재생",
-                modifier = Modifier.size(40.dp))
+                modifier = Modifier.size(44.dp))
         }
-        IconButton(onClick = onNext, enabled = enabled, modifier = Modifier.size(64.dp)) {
-            Icon(IconNext, contentDescription = "다음 채널", modifier = Modifier.size(40.dp))
+        FilledTonalIconButton(onClick = onNext, enabled = enabled, modifier = Modifier.size(64.dp), colors = sideColors) {
+            Icon(IconNext, contentDescription = "다음 채널", modifier = Modifier.size(32.dp))
         }
     }
 }
@@ -1061,9 +1065,9 @@ private fun BigVolume(
     val sysMode = volumeSync && !carMode
     val muted = if (sysMode) sysVol == 0 else appVolume == 0
     Row(Modifier.fillMaxWidth().height(BIG_VOLUME_H).systemGestureExclusion(), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onToggleMute, modifier = Modifier.size(40.dp)) {
+        IconButton(onClick = onToggleMute, modifier = Modifier.size(44.dp)) {
             Icon(if (muted) IconVolumeOff else IconVolume,
-                contentDescription = if (muted) "음소거 해제" else "음소거", modifier = Modifier.size(22.dp))
+                contentDescription = if (muted) "음소거 해제" else "음소거", modifier = Modifier.size(26.dp))
         }
         if (sysMode) {
             VolumeSlider(
@@ -1071,19 +1075,21 @@ private fun BigVolume(
                 onValueChange = { onSysVolume(it.roundToInt()) },
                 valueRange = 0f..sysMax.coerceAtLeast(1).toFloat(),
                 steps = (sysMax - 1).coerceAtLeast(0),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                heavy = true,
             )
         } else {
             VolumeSlider(
                 value = appVolume.toFloat(),
                 onValueChange = { onAppVolume((it / 5).roundToInt() * 5) },
                 valueRange = AppVolume.MIN.toFloat()..AppVolume.MAX.toFloat(),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                heavy = true,
             )
         }
         Text(
             if (sysMode) "${if (sysMax > 0) sysVol * 100 / sysMax else 0}%" else "${appVolume}%",
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelLarge,
             textAlign = TextAlign.End,
             modifier = Modifier.width(44.dp)
         )
@@ -1262,6 +1268,7 @@ internal fun VolumeSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     modifier: Modifier = Modifier,
     steps: Int = 0,
+    heavy: Boolean = false,   // 큰 재생기: 막대·손잡이를 굵게
 ) {
     val interaction = remember { MutableInteractionSource() }
     Slider(
@@ -1269,16 +1276,19 @@ internal fun VolumeSlider(
         onValueChange = onValueChange,
         valueRange = valueRange,
         steps = steps,
-        modifier = modifier.height(44.dp),
+        modifier = modifier.height(if (heavy) 48.dp else 44.dp),
         interactionSource = interaction,
         thumb = {
             // 누를 때 모양이 변하지 않는 단순한 동그라미 손잡이
             Box(
                 Modifier
-                    .size(22.dp)
+                    .size(if (heavy) 28.dp else 22.dp)
                     .shadow(2.dp, CircleShape)
                     .background(MaterialTheme.colorScheme.primary, CircleShape)
             )
+        },
+        track = { state ->
+            SliderDefaults.Track(sliderState = state, modifier = Modifier.height(if (heavy) 24.dp else 16.dp))
         }
     )
 }
