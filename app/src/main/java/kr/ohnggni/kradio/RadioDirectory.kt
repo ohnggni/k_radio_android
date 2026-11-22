@@ -44,11 +44,12 @@ object RadioDirectory {
 
     private const val INLIVE_LIVE = "https://api.inlive.co.kr/openapi/liveList"
 
-    /** 지금 방송 중인 인라이브 방송, 청취자 많은 순. 앞쪽 몇 쪽만 받아서 방송 중인 것만 */
+    /** 지금 방송 중인 인라이브 방송, 청취자 많은 순 (50개씩 pages번, 최대 150개) */
     suspend fun inliveOnAir(pages: Int = 3): List<WebStation> = coroutineScope {
         val all = (1..pages).map { pg ->
             async(Dispatchers.IO) {
-                runCatching { parseInlive(JSONObject(get(if (pg == 1) INLIVE_LIVE else "$INLIVE_LIVE?page=$pg"))) }
+                // onair=Y 방송 중만, display 최대 50, start = 결과 시작점(1부터)
+                runCatching { parseInlive(JSONObject(get("$INLIVE_LIVE?onair=Y&gubun=A&display=50&start=${1 + (pg - 1) * 50}"))) }
                     .onFailure { Log.w("KRadio", "인라이브 목록 실패(${pg}쪽): ${it.message}") }
                     .getOrNull()
             }
