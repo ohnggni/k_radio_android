@@ -1186,6 +1186,8 @@ private fun BigCover(
         value = ch.logo?.let { LogoCache.get(context, it) }
     }
     val tint = bannerColor(ch.name)
+    // 표지 위 프로그램 글자는 편성 정보가 있을 때만 (없으면 채널명이 배너와 겹쳐 두 번 나옴)
+    val showOverlay = overlay && program != null
     Box(
         modifier
             .clip(RoundedCornerShape(16.dp))
@@ -1199,7 +1201,7 @@ private fun BigCover(
             l != null && l.width >= 256 -> Image(l, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             // 작은 로고(인터넷에서 받은 것 등)는 늘리면 흐려져서 가운데 흰 카드에 원래 비율로
             l != null -> Box(
-                Modifier.fillMaxSize().padding(bottom = if (overlay) 64.dp else 0.dp),   // 아래 글자와 겹치지 않게
+                Modifier.fillMaxSize().padding(bottom = if (showOverlay) 64.dp else 0.dp),   // 아래 글자와 겹치지 않게
                 contentAlignment = Alignment.Center
             ) {
                 Box(
@@ -1210,10 +1212,10 @@ private fun BigCover(
                     Image(l, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
                 }
             }
-            else -> NameBanner(ch.name)
+            else -> NameBanner(ch.name, top = showOverlay)
         }
         // 글자가 사진 위에서도 읽히게 아래쪽을 어둡게
-        if (overlay) Box(
+        if (showOverlay) Box(
             Modifier.fillMaxWidth().fillMaxHeight(0.45f).align(Alignment.BottomStart)
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))))
         )
@@ -1232,7 +1234,7 @@ private fun BigCover(
             Text(ch.name, color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1)
         }
         // 왼쪽 아래 프로그램 정보 (곡이 있을 때만)
-        if (overlay) Column(Modifier.align(Alignment.BottomStart).padding(14.dp)) {
+        if (showOverlay) Column(Modifier.align(Alignment.BottomStart).padding(14.dp)) {
             Text(
                 program?.title ?: ch.name,
                 color = Color.White,
@@ -1255,13 +1257,16 @@ private fun BigCover(
  * 실제 글자 폭을 재서 가장 긴 단어가 폭에, 전체 줄이 높이에 들어가는 가장 큰 크기로
  */
 @Composable
-private fun NameBanner(name: String) {
+private fun NameBanner(name: String, top: Boolean = false) {   // top: 아래에 프로그램 글자가 올 때 위쪽 칸에만
     val words = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.ifEmpty { listOf("K") }
     val latin = name.all { it.code < 128 }
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
-    BoxWithConstraints(Modifier.fillMaxSize().padding(start = 22.dp, end = 22.dp, top = 56.dp, bottom = 22.dp)) {
-        val wPx = with(density) { maxWidth.toPx() }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+      val bottomGap = if (top) maxHeight * 0.42f else 22.dp   // 위쪽에 둘 땐 아래 42%를 비움 (프로그램 글자 자리)
+      BoxWithConstraints(Modifier.fillMaxSize().padding(start = 22.dp, end = 22.dp, top = 56.dp, bottom = bottomGap)) {
+        // 글꼴 여백·자간 오차로 오른쪽 끝이 잘리지 않게 폭을 5% 덜 씀
+        val wPx = with(density) { maxWidth.toPx() } * 0.95f
         val hPx = with(density) { maxHeight.toPx() }
         fun style(sp: Float) = TextStyle(
             fontSize = sp.sp, lineHeight = (sp * 1.08f).sp,
@@ -1280,11 +1285,12 @@ private fun NameBanner(name: String) {
             }
             lo
         }
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = if (top) Arrangement.Top else Arrangement.Bottom) {
             words.forEach { w ->
                 Text(w, color = Color.White, style = style(fitSp), maxLines = 1, softWrap = false)
             }
         }
+      }
     }
 }
 
