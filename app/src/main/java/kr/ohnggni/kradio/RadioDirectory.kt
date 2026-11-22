@@ -1,0 +1,197 @@
+package kr.ohnggni.kradio
+
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URLEncoder
+
+/** 인터넷 방송 한 개 (인라이브 생방송 / 방송 안내 서비스 / 설정 파일의 추천 목록) */
+data class WebStation(
+    val name: String,
+    val url: String,          // 재생 주소 (pls·m3u·tune.ashx도 앱이 재생 직전에 풀어 씀)
+    val logo: String?,        // 로고·방송 그림 주소 (없으면 이름 첫 글자)
+    val sub: String?,         // 부제: 지금 방송 제목·곡·소개
+    val tag: String?,         // 짧은 꼬리표 (진행자, 장르 등)
+    val listeners: Int = 0,   // 인라이브 청취자 수
+    val bitrate: Int = 0,
+) {
+    /** 목록 부제: "진행자 · 청취 32 · 128k" + 방송 제목 */
+    fun meta(): String = listOfNotNull(
+        tag?.takeIf { it.isNotBlank() },
+        listeners.takeIf { it > 0 }?.let { "청취 $it" },
+        bitrate.takeIf { it > 0 }?.let { "${it}k" },
+        sub?.takeIf { it.isNotBlank() },
+    ).joinToString(" · ")
+}
+
+/**
+ * 인터넷 방송 찾기 데이터.
+ * - 인라이브 공개 API(liveList): 지금 방송 중인 개인 DJ 방송, 청취자 수·방송 그림 포함
+ * - 인터넷 방송 안내 서비스(OPML, 비공식): 분류·한국어 방송·검색, 로고·안정성 점수 포함.
+ *   재생 주소는 방송 ID로 된 tune.ashx 주소를 그대로 저장 → 재생할 때마다 최신 실제 주소를 받음
+ */
+object RadioDirectory {
+    var userAgent = "KRadio"
+
+    // ---------------- 인라이브 ----------------
+
+    private const val INLIVE_LIVE = "https://api.inlive.co.kr/openapi/liveList"
+
+    /** 지금 방송 중인 인라이브 방송, 청취자 많은 순. 앞쪽 몇 쪽만 받아서 방송 중인 것만 */
+    suspend fun inliveOnAir(pages: Int = 3): List<WebStation> = coroutineScope {
+        val all = (1..pages).map { pg ->
+            async(Dispatchers.IO) {
+                runCatching { parseInlive(JSONObject(get(if (pg == 1) INLIVE_LIVE else "$INLIVE_LIVE?page=$pg"))) }
+                    .onFailure { Log.w("KRadio", "인라이브 목록 실패($pg쪽): ${it.message}") }
+                    .getOrNull()
+            }
+        }.awaitAll()
+        if (all.all { it == null }) error("인라이브 목록을 못 받음")
+        all.filterNotNull().flatten()
+            .distinctBy { it.url }
+            .sortedByDescending { it.listeners }
+    }
+
+    private fun parseInlive(o: JSONObject): List<WebStation> {
+        val a = o.optJSONArray("channel") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { i ->
+            val c = a.optJSONObject(i) ?: return@mapNotNull null
+            if (c.optString("onair") != "Y") return@mapNotNull null
+            val pls = c.optString("pls").trim()
+            val name = c.optString("channelname").trim()
+            if (pls.isEmpty() || name.isEmpty()) return@mapNotNull null
+            WebStation(
+                name = name,
+                url = pls,
+                logo = c.optString("listimage").trim().ifBlank { null },
+                sub = c.optString("title").trim().ifBlank { null },
+                tag = c.optString("cjnick").trim().ifBlank { null },
+                listeners = c.optString("listeners").toIntOrNull() ?: 0,
+            )
+        }
+    }
+
+    // ---------------- 인터넷 방송 안내 서비스 (OPML) ----------------
+
+    private const val OPML = "https://opml.radiotime.com"
+
+    /** 음악 분류 (이름 → 분류 ID). 장르 칩에 씀 */
+    data class Category(val name: String, val id: String)
+
+    suspend fun musicCategories(): List<Category> = withContext(Dispatchers.IO) {
+        val body = JSONObject(get("$OPML/Browse.ashx?c=music&render=json")).optJSONArray("body") ?: JSONArray()
+        (0 until body.length()).mapNotNull { i ->
+            val x = body.optJSONObject(i) ?: return@mapNotNull null
+            val id = x.optString("guide_id")
+            val text = x.optString("text")
+            if (x.optString("type") != "link" || id.isBlank() || text.isBlank()) null else Category(text, id)
+        }
+    }
+
+    /** 분류 하나의 방송 목록 */
+    suspend fun category(id: String): List<WebStation> = browse("$OPML/Browse.ashx?id=${enc(id)}&render=json")
+
+    /** 한국어 방송 (음악·대화 하위 분류까지 따라가서 모음) */
+    suspend fun korean(): List<WebStation> = browse("$OPML/Browse.ashx?c=lang&filter=l180&render=json", follow = 8)
+
+    /** 이름 검색 (방송만) */
+    suspend fun search(q: String): List<WebStation> =
+        browse("$OPML/Search.ashx?query=${enc(q)}&types=station&render=json")
+
+    /**
+     * 목록을 받아 방송만 모음. 방송 없이 하위 분류 링크만 오면 앞쪽 몇 개(follow)를 더 받아서 합침
+     */
+    private suspend fun browse(url: String, follow: Int = 0): List<WebStation> = withContext(Dispatchers.IO) {
+        val body = JSONObject(get(url)).optJSONArray("body") ?: JSONArray()
+        val stations = ArrayList<WebStation>()
+        val links = ArrayList<String>()
+        collect(body, stations, links)
+        if (follow > 0 && stations.size < 10) {
+            coroutineScope {
+                links.take(follow).map { link ->
+                    async {
+                        runCatching {
+                            val b = JSONObject(get(withJson(link))).optJSONArray("body") ?: JSONArray()
+                            val s = ArrayList<WebStation>(); collect(b, s, ArrayList()); s
+                        }.getOrDefault(emptyList())
+                    }
+                }.awaitAll().forEach { stations += it }
+            }
+        }
+        stations.distinctBy { it.url }
+    }
+
+    private fun collect(a: JSONArray, out: MutableList<WebStation>, links: MutableList<String>) {
+        for (i in 0 until a.length()) {
+            val x = a.optJSONObject(i) ?: continue
+            x.optJSONArray("children")?.let { collect(it, out, links) }
+            when {
+                x.optString("item") == "station" -> station(x)?.let { out += it }
+                x.optString("type") == "link" && x.optString("URL").contains("Browse.ashx", true) -> links += x.optString("URL")
+            }
+        }
+    }
+
+    private fun station(x: JSONObject): WebStation? {
+        val id = x.optString("guide_id").ifBlank { x.optString("preset_id") }
+        val name = x.optString("text").trim()
+        if (id.isBlank() || name.isBlank()) return null
+        val reliability = x.optString("reliability").toIntOrNull() ?: 100
+        if (reliability < 70) return null   // 자주 끊기는 방송은 숨김
+        return WebStation(
+            name = name,
+            url = "$OPML/Tune.ashx?id=${enc(id)}&formats=mp3,aac,ogg",
+            logo = x.optString("image").trim().ifBlank { null }?.replaceFirst("http://", "https://"),
+            sub = x.optString("playing").ifBlank { x.optString("subtext") }.trim().ifBlank { null },
+            tag = null,
+            bitrate = x.optString("bitrate").toIntOrNull() ?: 0,
+        )
+    }
+
+    private fun withJson(link: String): String {
+        val https = link.replaceFirst("http://", "https://")
+        return if (https.contains("render=json")) https else https + (if ('?' in https) "&" else "?") + "render=json"
+    }
+
+    // ---------------- 공통 ----------------
+
+    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+
+    private fun get(url: String): String {
+        val conn = URI(url).toURL().openConnection() as HttpURLConnection
+        conn.connectTimeout = 6000
+        conn.readTimeout = 10_000
+        conn.setRequestProperty("User-Agent", userAgent)
+        conn.setRequestProperty("Accept-Language", "ko-KR,ko;q=0.9")
+        try {
+            if (conn.responseCode !in 200..299) error("HTTP ${conn.responseCode}")
+            return conn.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** 설정 파일 internetPicks: [{"name","url","logo","tags":"a,b"}] */
+    fun parsePicks(a: JSONArray?): List<WebStation> {
+        if (a == null) return emptyList()
+        return (0 until a.length()).mapNotNull { i ->
+            val o = a.optJSONObject(i) ?: return@mapNotNull null
+            val url = o.optString("url").trim()
+            val name = o.optString("name").trim()
+            if (url.isEmpty() || name.isEmpty()) return@mapNotNull null
+            WebStation(
+                name = name, url = url,
+                logo = o.optString("logo").trim().ifBlank { null },
+                sub = null,
+                tag = o.optString("tags").split(',').map { it.trim() }.firstOrNull { it.isNotEmpty() },
+            )
+        }
+    }
+}

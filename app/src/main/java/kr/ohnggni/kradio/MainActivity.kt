@@ -145,7 +145,7 @@ class MainActivity : ComponentActivity() {
             appVersionName = it.versionName.orEmpty()
             appVersionCode = PackageInfoCompat.getLongVersionCode(it)
         }
-        RadioBrowser.userAgent = "KRadio/$appVersionName"
+        RadioDirectory.userAgent = "KRadio/$appVersionName"
 
         // 보고 있는 중에 폴드 접기/펴기·회전으로 화면만 다시 만들어질 때는 자동 재생하지 않음
         // - 프로세스가 새로 시작됐으면(오래 안 써서 정리됨) 새로 켠 것으로 봄 (1.10.1)
@@ -371,7 +371,6 @@ class MainActivity : ComponentActivity() {
                         addedUrls = prefs.custom.mapNotNull { it.url }.toSet(),
                         onAdd = { st ->
                             addCustom(st.name, st.url, st.logo)
-                            lifecycleScope.launch { RadioBrowser.countClick(st.uuid) }
                             Toast.makeText(this, "'${st.name}' 추가했어요", Toast.LENGTH_SHORT).show()
                         },
                         onAddManual = { name, url, logo ->

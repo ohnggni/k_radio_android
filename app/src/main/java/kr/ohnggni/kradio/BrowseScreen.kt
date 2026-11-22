@@ -23,24 +23,29 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/** 장르 칩: 표시 이름 → 디렉터리 태그 (null = 추천 첫 화면) */
-private val GENRES = listOf(
-    "추천" to null,
-    "K-pop" to "kpop",
-    "팝" to "pop",
-    "재즈" to "jazz",
-    "클래식" to "classical",
-    "로파이" to "lofi",
-    "록" to "rock",
-    "앰비언트" to "ambient",
-    "뉴스" to "news",
+/** 음악 분류 이름 한글화 (모르는 이름은 영문 그대로) */
+private val GENRE_KO = mapOf(
+    "Top 40 & Pop Music" to "팝·Top 40", "Rock Music" to "록", "Soul & R&B" to "소울·R&B", "Country" to "컨트리",
+    "World Music" to "월드", "Religious Music" to "종교", "Reggae & Dancehall" to "레게", "Latin Music" to "라틴",
+    "Jazz" to "재즈", "Classical" to "클래식", "Electronic" to "일렉트로닉", "Hip Hop" to "힙합", "Hip Hop & Rap" to "힙합",
+    "Oldies" to "올디스", "Easy Listening" to "이지 리스닝", "Folk" to "포크", "Blues" to "블루스", "Ambient" to "앰비언트",
+    "Decades" to "연대별", "Alternative" to "얼터너티브", "Metal" to "메탈", "Dance" to "댄스",
+    "Adult Hits" to "성인 히트", "Children's Music" to "어린이", "Holiday Music" to "시즌", "Soundtracks" to "OST",
 )
 
-/** 목록 화면 하나: 제목 + 찾기 조건 */
-private data class BrowseList(val title: String, val query: RadioBrowser.Query)
+/** 목록 화면 하나: 제목 + 받기 함수 */
+private class BrowseList(val title: String, val fetch: suspend () -> List<WebStation>)
+
+/** 검색: 지금 방송 중인 인라이브에서 이름·제목 일치 + 방송 안내 서비스 검색 */
+private suspend fun searchAll(q: String): List<WebStation> {
+    val live = runCatching { RadioDirectory.inliveOnAir() }.getOrDefault(emptyList())
+        .filter { it.name.contains(q, true) || (it.sub?.contains(q, true) == true) || (it.tag?.contains(q, true) == true) }
+    val dir = runCatching { RadioDirectory.search(q) }.getOrDefault(emptyList())
+    return (live + dir).distinctBy { it.url }
+}
 
 /**
- * 인터넷 방송 찾기: 검색 + 장르 칩 + 추천 줄(추천 방송 / 한국 인기 / 세계 인기).
+ * 인터넷 방송 찾기: 검색 + 장르 칩 + 추천 줄(추천 방송 / 지금 방송 중인 개인 DJ / 한국어 / K-pop).
  * "더 보기"·검색·장르는 세로 목록. + 버튼으로 바로 채널 추가(로고 포함).
  */
 @Composable
@@ -95,7 +100,7 @@ fun BrowseScreen(
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    placeholder = { Text("방송 이름 검색 (영문이 잘 찾아져)") },
+                    placeholder = { Text("방송 이름·DJ 검색") },
                     leadingIcon = { Icon(BrowseIconSearch, contentDescription = null) },
                     trailingIcon = {
                         if (text.isNotEmpty()) IconButton(onClick = { text = "" }) {
@@ -110,7 +115,7 @@ fun BrowseScreen(
                         if (q.isNotEmpty()) {
                             focus.clearFocus()
                             genre = null
-                            list = BrowseList("'$q' 검색 결과", RadioBrowser.Query.Name(q, 100))
+                            list = BrowseList("'$q' 검색 결과") { searchAll(q) }
                         }
                     }),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -121,16 +126,28 @@ fun BrowseScreen(
             }
             // ---------- 장르 칩 ----------
             item(key = "@chips") {
+                // 추천 · K-pop · 한국어 + 방송 안내 서비스의 음악 분류(받아 오는 대로)
+                val cats by produceState(emptyList<RadioDirectory.Category>()) {
+                    value = runCatching { RadioDirectory.musicCategories() }.getOrDefault(emptyList())
+                }
+                val chips: List<Pair<String, (() -> BrowseList)?>> = listOf<Pair<String, (() -> BrowseList)?>>(
+                    "추천" to null,
+                    "K-pop" to { BrowseList("K-pop 방송") { RadioDirectory.search("kpop") } },
+                    "한국어" to { BrowseList("한국어 방송") { RadioDirectory.korean() } },
+                ) + cats.map { c ->
+                    val label = GENRE_KO[c.name] ?: c.name
+                    label to { BrowseList("$label 방송") { RadioDirectory.category(c.id) } }
+                }
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(GENRES, key = { it.first }) { (label, tag) ->
+                    items(chips, key = { it.first }) { (label, make) ->
                         FilterChip(
                             selected = genre == label || (label == "추천" && list == null),
                             onClick = {
-                                if (tag == null) { list = null; genre = null }
-                                else { genre = label; list = BrowseList("$label 방송", RadioBrowser.Query.Tag(tag, 100)) }
+                                if (make == null) { list = null; genre = null }
+                                else { genre = label; list = make() }
                             },
                             label = { Text(label) },
                         )
@@ -148,14 +165,19 @@ fun BrowseScreen(
                             addedUrls, previewUrl, onAdd, onPreview)
                     }
                 }
-                item(key = "@kr") {
-                    StationShelf("한국 인기 방송", { runCatching { RadioBrowser.search(RadioBrowser.Query.Country("KR", 20)) } },
-                        { list = BrowseList("한국 인기 방송", RadioBrowser.Query.Country("KR", 100)) },
+                item(key = "@inlive") {
+                    StationShelf("지금 방송 중인 개인 DJ", { runCatching { RadioDirectory.inliveOnAir().take(20) } },
+                        { list = BrowseList("지금 방송 중인 개인 DJ") { RadioDirectory.inliveOnAir() } },
                         addedUrls, previewUrl, onAdd, onPreview)
                 }
-                item(key = "@world") {
-                    StationShelf("세계 인기 방송", { runCatching { RadioBrowser.search(RadioBrowser.Query.World(20)) } },
-                        { list = BrowseList("세계 인기 방송", RadioBrowser.Query.World(100)) },
+                item(key = "@korean") {
+                    StationShelf("한국어 방송", { runCatching { RadioDirectory.korean().take(20) } },
+                        { genre = "한국어"; list = BrowseList("한국어 방송") { RadioDirectory.korean() } },
+                        addedUrls, previewUrl, onAdd, onPreview)
+                }
+                item(key = "@kpop") {
+                    StationShelf("K-pop 방송", { runCatching { RadioDirectory.search("kpop").take(20) } },
+                        { genre = "K-pop"; list = BrowseList("K-pop 방송") { RadioDirectory.search("kpop") } },
                         addedUrls, previewUrl, onAdd, onPreview)
                 }
             } else {
@@ -243,7 +265,7 @@ private fun StationList(
     onAdd: (WebStation) -> Unit,
     onPreview: ((WebStation) -> Unit)?,
 ) {
-    val (load, retry) = rememberLoad(list.title) { runCatching { RadioBrowser.search(list.query) } }
+    val (load, retry) = rememberLoad(list.title) { runCatching { list.fetch() } }
     Column(Modifier.padding(top = 8.dp)) {
         Text(list.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
@@ -274,7 +296,7 @@ private fun StationCard(st: WebStation, added: Boolean, previewing: Boolean, onA
         }
         Spacer(Modifier.height(6.dp))
         Text(st.name, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(st.tags.firstOrNull() ?: st.country ?: " ", style = MaterialTheme.typography.labelSmall,
+        Text(if (st.listeners > 0) "청취 ${st.listeners}" else st.sub ?: st.tag ?: " ", style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

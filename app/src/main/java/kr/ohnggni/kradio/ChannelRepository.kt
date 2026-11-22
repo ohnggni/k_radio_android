@@ -180,7 +180,7 @@ object ChannelRepository {
         nowPlayingPollSeconds = root.optInt("nowPlayingPollSeconds", 30).coerceAtLeast(30)
         nowPlayingUserAgent = root.optString("nowPlayingUserAgent").ifEmpty { null }
         coverUrl = root.optString("coverUrl").ifEmpty { null }
-        internetPicks = RadioBrowser.parsePicks(root.optJSONArray("internetPicks"))
+        internetPicks = RadioDirectory.parsePicks(root.optJSONArray("internetPicks"))
         internetPicksTitle = root.optString("internetPicksTitle").ifEmpty { "추천 방송" }
         latestVersionCode = root.optLong("latestVersionCode", 0L).takeIf { it > 0 }
         latestVersionName = root.optString("latestVersionName").ifEmpty { null }
@@ -242,7 +242,8 @@ object ChannelRepository {
      */
     internal fun isPlaylistUrl(url: String): Boolean {
         val path = runCatching { URI(url).path }.getOrNull()?.lowercase() ?: return false
-        return path.endsWith(".pls") || path.endsWith(".m3u")
+        // tune.ashx: 인터넷 방송 안내 서비스의 "듣기" 주소 (그때그때 실제 방송 주소를 M3U로 돌려줌)
+        return path.endsWith(".pls") || path.endsWith(".m3u") || path.endsWith("/tune.ashx")
     }
 
     /** 재생 목록을 받아 첫 번째 방송 주소를 꺼냄. PLS(File1=...)와 M3U(주석이 아닌 첫 줄) 모두 처리 */
