@@ -148,6 +148,7 @@ class PlaybackService : MediaLibraryService() {
     // 자동 재연결 상태
     private var retryJob: Job? = null
     private var retryCount = 0
+    private var retryForId: String? = null   // 재연결을 예약한 채널 (채널이 바뀌면 예약·횟수 초기화)
 
     // 알림·잠금화면·워치·차량에 보낼 방송 정보 갱신용
     private var nowPlayingJob: Job? = null
@@ -302,7 +303,9 @@ class PlaybackService : MediaLibraryService() {
                     scope.launch { updateNowPlaying() }   // 다른 채널 항목에 남은 곡 제목 표시도 지움
                 }
                 syncNowPlaying()
-                // 방송 정보만 바뀐 경우(PLAYLIST_CHANGED)는 재연결 시도를 취소하지 않음
+                // 방송 정보만 바뀐 경우(PLAYLIST_CHANGED)는 재연결 시도를 취소하지 않음.
+                // 단, 채널 자체가 바뀌었으면(미리 듣기 방송을 연달아 누를 때 등) 이전 채널의 재연결 예약·횟수를 버림
+                if (retryForId != null && mediaItem?.mediaId != retryForId) cancelRetry()
                 if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                     cancelRetry()
                     scope.launch { updateNowPlaying() }
@@ -499,6 +502,7 @@ class PlaybackService : MediaLibraryService() {
         if (retryJob?.isActive == true) return      // 이미 예약됨
         val delayMs = (1000L shl retryCount.coerceAtMost(5)).coerceAtMost(MAX_RETRY_DELAY_MS)
         retryCount++
+        retryForId = exo.currentMediaItem?.mediaId
         Log.w("KRadio", "재연결 예약: ${delayMs}ms 후 (${retryCount}번째) - $reason")
         retryJob = scope.launch {
             delay(delayMs)
@@ -521,6 +525,7 @@ class PlaybackService : MediaLibraryService() {
         retryJob?.cancel()
         retryJob = null
         retryCount = 0
+        retryForId = null
     }
     /** 3초 넘게 멈췄다 재개하면, 쌓여 있던 지난 방송 대신 지금 방송(라이브 지점)부터 */
     private fun resumeAtLiveEdgeIfStale() {

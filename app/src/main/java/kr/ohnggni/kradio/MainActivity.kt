@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
     private var now by mutableLongStateOf(System.currentTimeMillis())
     private var currentId by mutableStateOf<String?>(null)
     private var previewStation by mutableStateOf<WebStation?>(null)   // 인터넷 방송 찾기에서 미리 듣는 방송
+    private var previewErrors = 0   // 미리 듣기 연결 실패 횟수 (2번이면 포기)
     private var isOn by mutableStateOf(false)
     private var status by mutableStateOf("채널 목록 불러오는 중...")
     private var song by mutableStateOf<String?>(null)   // 인터넷 방송이 보내 준 지금 곡 제목
@@ -459,6 +460,12 @@ class MainActivity : ComponentActivity() {
                     if (isPlaying) status = ""
                 }
                 override fun onPlayerError(error: PlaybackException) {
+                    // 미리 듣기는 계속 재연결하지 않고 두 번 실패하면 멈춤 (꺼진 방송이 많아서)
+                    if (currentId?.startsWith(PREVIEW_PREFIX) == true && ++previewErrors >= 2) {
+                        controller?.run { pause(); stop() }
+                        status = "지금 안 나오는 방송이에요"
+                        return
+                    }
                     status = "연결 끊김 · 재연결 중..."
                 }
             })
@@ -786,6 +793,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         previewStation = st
+        previewErrors = 0
         status = "${st.name} 연결 중..."
         currentId = id
         val extras = Bundle().apply {

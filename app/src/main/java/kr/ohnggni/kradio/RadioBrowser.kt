@@ -41,6 +41,9 @@ object RadioBrowser {
         "https://all.api.radio-browser.info",
     )
     @Volatile private var good = 0   // 마지막으로 성공한 서버부터 시도
+
+    /** 시간 제한 있는 인증 주소 표시 (token=, Signature= 등): 등록한 사람이 접속할 때 받은 주소라 금방 만료됨 */
+    private val TEMP_URL = Regex("[?&](token|auth|authkey|key|expires?|exp|signature|policy|hdnts|hdnea|wmsAuthSign|st|e)=", RegexOption.IGNORE_CASE)
     var userAgent = "KRadio"
 
     /** 찾기 조건 */
@@ -97,6 +100,7 @@ object RadioBrowser {
             val url = o.optString("url_resolved").ifBlank { o.optString("url") }.trim()
             val name = o.optString("name").trim()
             if (url.isEmpty() || name.isEmpty()) return@mapNotNull null
+            if (TEMP_URL.containsMatchIn(url)) return@mapNotNull null   // 개인이 따 온 일회용 주소(토큰·서명)는 곧 막혀서 제외
             if (!seen.add(url)) return@mapNotNull null   // 같은 주소 중복 등록 제거
             WebStation(
                 uuid = o.optString("stationuuid").ifBlank { null },
