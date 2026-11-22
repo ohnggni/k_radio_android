@@ -13,6 +13,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +39,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -874,6 +877,7 @@ private fun BigPlayer(
         val cs = MaterialTheme.colorScheme
         val density = LocalDensity.current
         var drag by remember { mutableFloatStateOf(0f) }
+        var hDrag by remember { mutableFloatStateOf(0f) }   // 표지 가로 끌기 (왼쪽 = 다음, 오른쪽 = 이전 채널)
         var showRecent by remember { mutableStateOf(false) }
         // 진행 막대·남은 시간용 시계 (화면이 열려 있을 때만 1초마다)
         val clock by produceState(System.currentTimeMillis()) {
@@ -885,6 +889,21 @@ private fun BigPlayer(
                 onDragStart = { drag = 0f },
                 onDragEnd = { if (drag > with(density) { 120.dp.toPx() }) onClose() },
             ) { _, dy -> drag += dy }
+        }
+        val swipeChannel = Modifier.pointerInput(enabled) {
+            if (!enabled) return@pointerInput
+            detectHorizontalDragGestures(
+                onDragStart = { hDrag = 0f },
+                onDragCancel = { hDrag = 0f },
+                onDragEnd = {
+                    val limit = with(density) { 80.dp.toPx() }
+                    when {
+                        hDrag < -limit -> onNext()
+                        hDrag > limit -> onPrev()
+                    }
+                    hDrag = 0f
+                },
+            ) { _, dx -> hDrag += dx }
         }
 
         if (showRecent) {
@@ -924,19 +943,26 @@ private fun BigPlayer(
                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                     val wide = maxWidth > maxHeight * 1.15f
                     // 표지 아래(또는 옆)에 오는 기둥: 정보 칸 + 재생 버튼 + 음량
-                    val stack = BIG_INFO_H + BIG_GAP + BIG_CONTROLS_H + BIG_VOLUME_H
+                    val stack = BIG_INFO_H + BIG_INFO_GAP + BIG_CONTROLS_H + BIG_VOL_GAP + BIG_VOLUME_H
                     val side = if (wide) minOf(maxHeight, (maxWidth - BIG_GAP * 2) / 2)
                                else minOf(maxWidth, maxHeight - BIG_GAP - stack).coerceAtLeast(120.dp)
                     val coverBox: @Composable () -> Unit = {
                         BigCover(ch, program, host, cover, clock, overlay = song != null,
-                            modifier = Modifier.size(side).then(swipeClose))
+                            modifier = Modifier.size(side)
+                                .graphicsLayer { translationX = hDrag * 0.4f }   // 끄는 방향으로 살짝 따라옴
+                                .then(swipeClose).then(swipeChannel))
                     }
+                    // 음량 막대가 표지 폭 전체를 쓰게: 스피커 아이콘·%는 기둥 바깥 여백으로 (자리가 없으면 안쪽)
+                    val volExtra = (if (wide) minOf(BIG_VOL_SIDE, BIG_GAP, (maxWidth - side * 2 - BIG_GAP * 2) / 2)
+                                    else minOf(BIG_VOL_SIDE, (maxWidth - side) / 2)).coerceAtLeast(0.dp)
                     val column: @Composable () -> Unit = {
-                        Column(Modifier.width(side)) {
+                        Column(Modifier.width(side), horizontalAlignment = Alignment.CenterHorizontally) {
                             BigInfo(ch, program, host, song, songArt, cover, songSpan, isOn, clock)
-                            Spacer(Modifier.height(BIG_GAP))
+                            Spacer(Modifier.height(BIG_INFO_GAP))
                             BigControls(isOn, enabled, onPrev, onPlayStop, onNext)
-                            BigVolume(appVolume, volumeSync, sysVol, sysMax, onAppVolume, onSysVolume, onToggleMute, carMode)
+                            Spacer(Modifier.height(BIG_VOL_GAP))
+                            BigVolume(appVolume, volumeSync, sysVol, sysMax, onAppVolume, onSysVolume, onToggleMute, carMode,
+                                modifier = Modifier.requiredWidth(side + volExtra * 2))
                         }
                     }
                     if (wide) {
@@ -965,6 +991,9 @@ private val BIG_INFO_H = 104.dp
 private val BIG_CONTROLS_H = 88.dp
 private val BIG_VOLUME_H = 48.dp
 private val BIG_GAP = 16.dp
+private val BIG_INFO_GAP = 8.dp      // 정보 칸 ↔ 재생 버튼
+private val BIG_VOL_GAP = 16.dp      // 재생 버튼 ↔ 음량
+private val BIG_VOL_SIDE = 44.dp     // 음량 줄의 스피커 아이콘·% 자리 (기둥 바깥으로 내보내는 폭)
 private val BIG_BOTTOM_GAP = 28.dp   // 음량 아래 여백 (화면 끝에 붙지 않게)
 
 /** 표지 아래 정보 칸: 곡이 있으면 곡·진행 막대, 없으면 방송 정보 (높이 고정) */
@@ -1061,10 +1090,11 @@ private fun BigControls(isOn: Boolean, enabled: Boolean, onPrev: () -> Unit, onP
 private fun BigVolume(
     appVolume: Int, volumeSync: Boolean, sysVol: Int, sysMax: Int,
     onAppVolume: (Int) -> Unit, onSysVolume: (Int) -> Unit, onToggleMute: () -> Unit, carMode: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     val sysMode = volumeSync && !carMode
     val muted = if (sysMode) sysVol == 0 else appVolume == 0
-    Row(Modifier.fillMaxWidth().height(BIG_VOLUME_H).systemGestureExclusion(), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.height(BIG_VOLUME_H).systemGestureExclusion(), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onToggleMute, modifier = Modifier.size(44.dp)) {
             Icon(if (muted) IconVolumeOff else IconVolume,
                 contentDescription = if (muted) "음소거 해제" else "음소거", modifier = Modifier.size(26.dp))
