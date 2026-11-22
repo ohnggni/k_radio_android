@@ -48,10 +48,14 @@ fun BrowseScreen(
     addedUrls: Set<String>,                         // 이미 추가된 주소 (✓ 표시)
     onAdd: (WebStation) -> Unit,
     onAddManual: (name: String, url: String, logo: String) -> Unit,
-    onPreview: ((WebStation) -> Unit)?,             // 로고 누르면 미리 듣기 (null이면 안 함)
-    previewUrl: String?,                            // 지금 미리 듣는 방송 주소 (표시용)
+    onPreview: ((WebStation) -> Unit)?,             // 로고 누르면 미리 듣기 (다시 누르면 정지)
+    preview: WebStation?,                           // 지금 재생기에 올라 있는 미리 듣기 방송
+    previewOn: Boolean,                             // 재생 중인지
+    previewStatus: String,                          // 연결 중·오류 등 상태 글자
+    onPreviewStop: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val previewUrl = preview?.url?.takeIf { previewOn }
     val cs = MaterialTheme.colorScheme
     val focus = LocalFocusManager.current
     var text by rememberSaveable { mutableStateOf("") }
@@ -75,6 +79,11 @@ fun BrowseScreen(
                 }
                 Text("인터넷 방송 찾기", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             }
+        },
+        bottomBar = {
+            if (preview != null) PreviewBar(preview, previewOn, previewStatus, preview.url in addedUrls,
+                onToggle = { if (previewOn) onPreviewStop() else onPreview?.invoke(preview) },
+                onAdd = { onAdd(preview) })
         }
     ) { inner ->
         LazyColumn(
@@ -314,6 +323,32 @@ private fun PreviewBadge(modifier: Modifier) {
     }
 }
 
+/** 미리 듣기 막대: 로고·이름·상태 + 재생/정지 + 추가 */
+@Composable
+private fun PreviewBar(st: WebStation, on: Boolean, status: String, added: Boolean, onToggle: () -> Unit, onAdd: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(color = cs.primaryContainer) {
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ChannelLogo(st.logo, st.name, Modifier.size(44.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(st.name, style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(status.ifEmpty { if (on) "미리 듣는 중" else "멈춤" }, style = MaterialTheme.typography.bodySmall,
+                    color = cs.onPrimaryContainer.copy(alpha = 0.75f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            FilledIconButton(onClick = onToggle, modifier = Modifier.size(44.dp)) {
+                Icon(if (on) BrowseIconStop else BrowseIconPlay, contentDescription = if (on) "정지" else "재생")
+            }
+            Spacer(Modifier.width(8.dp))
+            AddButton(added, onAdd, Modifier.size(36.dp))
+        }
+    }
+}
+
 @Composable
 private fun LoadingLine() {
     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -337,4 +372,6 @@ private val BrowseIconBack = svgIcon("browse_back", "M20,11H7.83l5.59,-5.59L12,4
 private val BrowseIconSearch = svgIcon("browse_search", "M15.5,14h-0.79l-0.28,-0.27C15.41,12.59 16,11.11 16,9.5 16,5.91 13.09,3 9.5,3S3,5.91 3,9.5 5.91,16 9.5,16c1.61,0 3.09,-0.59 4.23,-1.57l0.27,0.28v0.79l5,4.99L20.49,19l-4.99,-5zM9.5,14C7.01,14 5,11.99 5,9.5S7.01,5 9.5,5 14,7.01 14,9.5 11.99,14 9.5,14z")
 private val BrowseIconClose = svgIcon("browse_close", "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z")
 private val BrowseIconAdd = svgIcon("browse_add", "M19,13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z")
+private val BrowseIconPlay = svgIcon("browse_play", "M8,5v14l11,-7z")
+private val BrowseIconStop = svgIcon("browse_stop", "M6,6h12v12H6z")
 private val BrowseIconCheck = svgIcon("browse_check", "M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z")

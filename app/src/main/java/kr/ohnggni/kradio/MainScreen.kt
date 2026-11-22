@@ -167,8 +167,9 @@ fun MainScreen(
     hasSchedules: Boolean,
     onOpenSchedules: () -> Unit,
     onOpenBrowse: () -> Unit,   // 인터넷 방송 찾기
+    extra: Channel? = null,     // 미리 듣는 인터넷 방송 (채널 목록엔 없지만 재생기에 표시)
 ) {
-    val current = channels.firstOrNull { it.id == currentId }
+    val current = channels.firstOrNull { it.id == currentId } ?: extra?.takeIf { it.id == currentId }
     // 대형 재생기: 하단 재생기의 빈 곳(로고·글자)을 누르면 열림
     var big by rememberSaveable { mutableStateOf(false) }
     if (big && current != null) {

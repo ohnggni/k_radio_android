@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private var epg by mutableStateOf<EpgData?>(null)
     private var now by mutableLongStateOf(System.currentTimeMillis())
     private var currentId by mutableStateOf<String?>(null)
+    private var previewStation by mutableStateOf<WebStation?>(null)   // 인터넷 방송 찾기에서 미리 듣는 방송
     private var isOn by mutableStateOf(false)
     private var status by mutableStateOf("채널 목록 불러오는 중...")
     private var song by mutableStateOf<String?>(null)   // 인터넷 방송이 보내 준 지금 곡 제목
@@ -285,6 +286,7 @@ class MainActivity : ComponentActivity() {
                             hasSchedules = schedules.any { it.enabled },
                             onOpenSchedules = { screen = Screen.SCHEDULE },
                             onOpenBrowse = { browseFrom = Screen.MAIN; screen = Screen.BROWSE },
+                            extra = previewChannel(),
                         )
                         if (showSleep) {
                             SleepTimerDialog(
@@ -375,8 +377,11 @@ class MainActivity : ComponentActivity() {
                             addCustom(name, url, logo.ifBlank { null })
                             Toast.makeText(this, "'$name' 추가했어요", Toast.LENGTH_SHORT).show()
                         },
-                        onPreview = null,
-                        previewUrl = null,
+                        onPreview = { togglePreview(it) },
+                        preview = previewStation?.takeIf { currentId == previewId(it) },
+                        previewOn = isOn,
+                        previewStatus = status,
+                        onPreviewStop = { previewStation?.let { togglePreview(it) } },
                         onBack = { screen = browseFrom },
                     )
                     Screen.GUIDE -> GuideScreen(onBack = { screen = Screen.SETTINGS })
@@ -758,6 +763,46 @@ class MainActivity : ComponentActivity() {
         status = "${ch.name} 연결 중..."
         currentId = ch.id
         c.setMediaItem(MediaItem.Builder().setMediaId(ch.id).build())
+        c.prepare()
+        c.play()
+    }
+
+    // ---------------- 인터넷 방송 미리 듣기 ----------------
+
+    private fun previewId(st: WebStation) = PREVIEW_PREFIX + Integer.toHexString(st.url.hashCode())
+
+    /** 미리 듣는 방송을 하단 재생기에 보여줄 임시 채널 (채널 목록엔 안 들어감) */
+    private fun previewChannel(): Channel? = previewStation?.let {
+        Channel(id = previewId(it), name = it.name, group = "미리 듣기", type = "direct", url = it.url, logo = it.logo)
+    }
+
+    /** 같은 방송을 듣는 중이면 정지, 아니면 그 방송만 재생 */
+    private fun togglePreview(st: WebStation) {
+        val c = controller ?: return
+        val id = previewId(st)
+        if (currentId == id && c.playWhenReady) {
+            c.pause()
+            c.stop()
+            return
+        }
+        previewStation = st
+        status = "${st.name} 연결 중..."
+        currentId = id
+        val extras = Bundle().apply {
+            putString(PREVIEW_NAME, st.name)
+            st.logo?.let { putString(PREVIEW_LOGO, it) }
+        }
+        c.setMediaItem(
+            MediaItem.Builder()
+                .setMediaId(id)
+                .setRequestMetadata(
+                    MediaItem.RequestMetadata.Builder()
+                        .setMediaUri(android.net.Uri.parse(st.url))
+                        .setExtras(extras)
+                        .build()
+                )
+                .build()
+        )
         c.prepare()
         c.play()
     }

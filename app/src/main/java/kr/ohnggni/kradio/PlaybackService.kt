@@ -68,6 +68,11 @@ import android.provider.Settings
 const val ACTION_WIDGET_STOP = "kr.ohnggni.kradio.widget.STOP"
 const val ACTION_WIDGET_PLAY_CHANNEL = "kr.ohnggni.kradio.widget.PLAY_CHANNEL_DIRECT"
 private const val SCHEME = "kradio"
+
+// 인터넷 방송 찾기의 미리 듣기: mediaId 앞머리와 요청 정보(requestMetadata extras) 키
+internal const val PREVIEW_PREFIX = "preview_"
+internal const val PREVIEW_NAME = "kradio.preview.name"
+internal const val PREVIEW_LOGO = "kradio.preview.logo"
 /** 재생 항목 정보(extras)에 넣는 인터넷 방송 곡 제목 키. 앱 화면이 읽음 */
 internal const val SONG_EXTRA = "kradio.song"
 /** 선곡 정보가 있으면 앨범아트 주소 (앱 화면이 읽음) */
@@ -111,6 +116,13 @@ class PlaybackService : MediaLibraryService() {
     // 사용자 설정이 반영된 전체 채널 (숨김 포함, 주소 해석용)
     @Volatile
     private var allChannels: List<Channel> = emptyList()
+
+    /** 인터넷 방송 찾기의 미리 듣기 채널 (채널 목록엔 없음, ID는 PREVIEW_PREFIX로 시작) */
+    @Volatile private var previewChannel: Channel? = null
+
+    /** 채널 목록 + 미리 듣기 채널에서 ID로 찾기 */
+    private fun channelById(id: String?): Channel? =
+        if (id == null) null else allChannels.firstOrNull { it.id == id } ?: previewChannel?.takeIf { it.id == id }
 
     // 채널 관리 화면에서 설정을 바꾸면 재생 목록에 바로 반영
     // 채널 관리·출처·타이머 설정이 바뀌면 바로 반영
@@ -205,7 +217,7 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun nowPlayingMeta(m: MediaMetadata): MediaMetadata {
         val id = exoPlayer?.currentMediaItem?.mediaId ?: return m
-        val ch = allChannels.firstOrNull { it.id == id } ?: return m
+        val ch = channelById(id) ?: return m
         // 프로그램 표지(줄여 둔 것)가 있으면 그걸, 없으면 채널 로고 (앨범아트는 앱 화면에만)
         val data = m.extras?.getString(COVER_ART_EXTRA)?.let { CoverArt.bytes(this, it) }
             ?: logoBytes(ch) ?: return m          // 아직 못 받은 인터넷 로고: 주소 그대로
@@ -279,7 +291,8 @@ class PlaybackService : MediaLibraryService() {
 
         exo.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                mediaItem?.mediaId?.let { prefs.edit().putString("last_channel", it).apply() }
+                mediaItem?.mediaId?.takeIf { !it.startsWith(PREVIEW_PREFIX) }
+                    ?.let { prefs.edit().putString("last_channel", it).apply() }
                 // 곡 제목은 지금 듣는 채널 것만. 앱에서 채널을 누르면 재생 목록을 새로 만들어서
                 // 전환 사유가 PLAYLIST_CHANGED로 오므로, 사유가 아니라 채널 ID로 판단
                 val keep = setOfNotNull(mediaItem?.mediaId)
@@ -584,7 +597,7 @@ class PlaybackService : MediaLibraryService() {
     private fun updateWidget() {
         val exo = exoPlayer ?: return
         val item = exo.currentMediaItem
-        val ch = allChannels.firstOrNull { it.id == item?.mediaId }
+        val ch = channelById(item?.mediaId)
         val am = getSystemService(AudioManager::class.java)
         val data = WidgetState.Data(
             channelId = item?.mediaId,
@@ -747,7 +760,7 @@ class PlaybackService : MediaLibraryService() {
         val at = when {
             autoOff > 0 -> System.currentTimeMillis() + autoOff * 60_000L
             autoOff == AUTO_OFF_PROGRAM_END -> {
-                val ch = allChannels.firstOrNull { it.id == exoPlayer?.currentMediaItem?.mediaId }
+                val ch = channelById(exoPlayer?.currentMediaItem?.mediaId)
                 val epg = runCatching {
                     EpgRepository.load(this, SourceSettings.epgUrl(this), quiet = true)
                 }.getOrNull()
@@ -1025,7 +1038,7 @@ class PlaybackService : MediaLibraryService() {
     private fun syncNowPlaying() {
         val exo = exoPlayer ?: return
         val template = ChannelRepository.nowPlayingUrl
-        val ch = if (exo.playWhenReady) allChannels.firstOrNull { it.id == exo.currentMediaItem?.mediaId } else null
+        val ch = if (exo.playWhenReady) channelById(exo.currentMediaItem?.mediaId) else null
         val npId = ch?.nowPlaying
         if (ch == null || npId == null || template == null) {
             songPollJob?.cancel()
@@ -1211,7 +1224,7 @@ class PlaybackService : MediaLibraryService() {
     private fun resolveSpec(spec: DataSpec): DataSpec {
         if (spec.uri.scheme == SCHEME) {
             val id = spec.uri.lastPathSegment ?: throw IOException("채널 ID 없음")
-            val ch = allChannels.firstOrNull { it.id == id }
+            val ch = channelById(id)
                 ?: throw IOException("알 수 없는 채널: $id")
 
             val now = System.currentTimeMillis()
@@ -1401,6 +1414,25 @@ class PlaybackService : MediaLibraryService() {
             startPositionMs: Long
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
             val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            // 인터넷 방송 찾기의 미리 듣기: 그 방송 하나만 재생 목록에
+            val first = mediaItems.firstOrNull()
+            val pvUrl = first?.requestMetadata?.mediaUri?.toString()
+            if (first != null && first.mediaId.startsWith(PREVIEW_PREFIX) && !pvUrl.isNullOrBlank()) {
+                val ex = first.requestMetadata.extras
+                val ch = Channel(
+                    id = first.mediaId,
+                    name = ex?.getString(PREVIEW_NAME) ?: "미리 듣기",
+                    group = "미리 듣기",
+                    type = "direct",
+                    url = pvUrl,
+                    logo = ex?.getString(PREVIEW_LOGO),
+                )
+                previewChannel = ch
+                resolvedCache.remove(ch.id)
+                Log.i("KRadio", "미리 듣기: ${ch.name}")
+                future.set(MediaSession.MediaItemsWithStartPosition(mutableListOf(placeholderItem(ch)), 0, C.TIME_UNSET))
+                return future
+            }
             scope.launch {
                 try {
                     var list = getChannels()
