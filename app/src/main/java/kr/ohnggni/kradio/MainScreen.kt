@@ -166,6 +166,7 @@ fun MainScreen(
     carMode: Boolean,
     hasSchedules: Boolean,
     onOpenSchedules: () -> Unit,
+    onOpenBrowse: () -> Unit,   // 인터넷 방송 찾기
 ) {
     val current = channels.firstOrNull { it.id == currentId }
     // 대형 재생기: 하단 재생기의 빈 곳(로고·글자)을 누르면 열림
@@ -267,6 +268,10 @@ fun MainScreen(
                 // "전체 채널" + 목록/타일 전환
                 item(key = "@head", span = full) {
                     SectionHead("전체 채널", rememberVectorPainter(IconRadio), null, grid) {
+                        IconButton(onClick = onOpenBrowse, modifier = Modifier.size(40.dp)) {
+                            Icon(IconAddChannel, contentDescription = "인터넷 방송 찾기", tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp))
+                        }
                         ViewToggle(grid) { onTab(if (grid) ChannelTab.LIST else ChannelTab.GRID) }
                     }
                 }
@@ -1437,6 +1442,7 @@ internal fun svgIcon(name: String, d: String): ImageVector =
     ).addPath(pathData = addPathNodes(d), fill = SolidColor(Color.Black)).build()
 
 private val IconPlay = svgIcon("play", "M8,5v14l11,-7z")
+private val IconAddChannel = svgIcon("add_channel", "M19,13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z")
 private val IconHistory = svgIcon("history",
     "M13,3a9,9 0,0 0,-9 9H1l3.89,3.89 0.07,0.14L9,12H6c0,-3.87 3.13,-7 7,-7s7,3.13 7,7 -3.13,7 -7,7c-1.93,0 -3.68,-0.79 -4.94,-2.06l-1.42,1.42A8.95,8.95 0,0 0,13 21a9,9 0,0 0,0 -18zM12,8v5l4.28,2.54 0.72,-1.21 -3.5,-2.08V8H12z")
 private val IconChevronDown = svgIcon("chevdown", "M7.41,8.59L12,13.17l4.59,-4.58L18,10l-6,6 -6,-6z")

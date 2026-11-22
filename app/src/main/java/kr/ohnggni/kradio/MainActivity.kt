@@ -44,7 +44,7 @@ import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.glance.appwidget.updateAll
 
-private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE, SCHEDULE, NOTES }
+private enum class Screen { MAIN, SETTINGS, MANAGE, GUIDE, SCHEDULE, NOTES, BROWSE }
 /**
  * 이 프로세스에서 화면을 한 번이라도 만들었는지. 프로세스가 정리되면 false로 돌아감.
  * 폴드·회전(같은 프로세스)과, 오래 안 써서 정리된 뒤 화면 상태만 복원된 경우를 구분하는 데 씀
@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
     private var recent by mutableStateOf<List<String>>(emptyList())  // 방금 나온 곡 "HH:mm\t곡명\t가수"
 
     private var screen by mutableStateOf(Screen.MAIN)
+    private var browseFrom = Screen.MAIN   // 인터넷 방송 찾기에서 뒤로 가면 돌아갈 화면
     private var warning by mutableStateOf<String?>(null)
     private var reloading by mutableStateOf(false)
     private var customConfig by mutableStateOf<String?>(null)
@@ -142,6 +143,7 @@ class MainActivity : ComponentActivity() {
             appVersionName = it.versionName.orEmpty()
             appVersionCode = PackageInfoCompat.getLongVersionCode(it)
         }
+        RadioBrowser.userAgent = "KRadio/$appVersionName"
 
         // 보고 있는 중에 폴드 접기/펴기·회전으로 화면만 다시 만들어질 때는 자동 재생하지 않음
         // - 프로세스가 새로 시작됐으면(오래 안 써서 정리됨) 새로 켠 것으로 봄 (1.10.1)
@@ -225,6 +227,8 @@ class MainActivity : ComponentActivity() {
                     screen = when (screen) {
                         Screen.SETTINGS -> Screen.MAIN
                         Screen.SCHEDULE -> Screen.MAIN
+                        Screen.BROWSE -> browseFrom
+                        Screen.MANAGE -> Screen.SETTINGS
                         else -> Screen.SETTINGS
                     }
                 }
@@ -280,6 +284,7 @@ class MainActivity : ComponentActivity() {
                             carMode = carMode,
                             hasSchedules = schedules.any { it.enabled },
                             onOpenSchedules = { screen = Screen.SCHEDULE },
+                            onOpenBrowse = { browseFrom = Screen.MAIN; screen = Screen.BROWSE },
                         )
                         if (showSleep) {
                             SleepTimerDialog(
@@ -353,10 +358,26 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         onAdd = { name, url, logo -> addCustom(name, url, logo.ifBlank { null }) },
+                        onOpenBrowse = { browseFrom = Screen.MANAGE; screen = Screen.BROWSE },
                         onEdit = { id, name, url, logo -> editChannel(id, name, url, logo) },
                         onResetChannel = { id -> updatePrefs(prefs.copy(overrides = prefs.overrides - id)) },
                         onDelete = { id -> deleteCustom(id) },
                         onResetAll = { resetAll() },
+                    )
+                    Screen.BROWSE -> BrowseScreen(
+                        addedUrls = prefs.custom.mapNotNull { it.url }.toSet(),
+                        onAdd = { st ->
+                            addCustom(st.name, st.url, st.logo)
+                            lifecycleScope.launch { RadioBrowser.countClick(st.uuid) }
+                            Toast.makeText(this, "'${st.name}' 추가했어요", Toast.LENGTH_SHORT).show()
+                        },
+                        onAddManual = { name, url, logo ->
+                            addCustom(name, url, logo.ifBlank { null })
+                            Toast.makeText(this, "'$name' 추가했어요", Toast.LENGTH_SHORT).show()
+                        },
+                        onPreview = null,
+                        previewUrl = null,
+                        onBack = { screen = browseFrom },
                     )
                     Screen.GUIDE -> GuideScreen(onBack = { screen = Screen.SETTINGS })
                     Screen.NOTES -> ReleaseNotesScreen(

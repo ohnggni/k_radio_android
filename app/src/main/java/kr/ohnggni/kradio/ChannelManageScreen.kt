@@ -30,6 +30,7 @@ fun ChannelManageScreen(
     onReorder: (List<String>) -> Unit,
     onToggleVisible: (String, Boolean) -> Unit,
     onAdd: (name: String, url: String, logo: String) -> Unit,
+    onOpenBrowse: () -> Unit,   // "+ 채널 추가" → 인터넷 방송 찾기 (주소 직접 입력은 그 화면 맨 아래)
     onEdit: (id: String, name: String, url: String, logo: String) -> Unit,
     onResetChannel: (String) -> Unit,
     onDelete: (String) -> Unit,
@@ -37,7 +38,6 @@ fun ChannelManageScreen(
 ) {
     val edited = overrides.keys
     var list by remember(all) { mutableStateOf(all) }
-    var showAdd by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Channel?>(null) }
     var confirmDelete by remember { mutableStateOf<Channel?>(null) }
     var confirmResetAll by remember { mutableStateOf(false) }
@@ -158,26 +158,11 @@ fun ChannelManageScreen(
             }
             item {
                 OutlinedButton(
-                    onClick = { showAdd = true },
+                    onClick = onOpenBrowse,
                     modifier = Modifier.fillMaxWidth().padding(16.dp)
                 ) { Text("+ 채널 추가") }
             }
         }
-    }
-
-    // ---------- 추가 ----------
-    if (showAdd) {
-        ChannelDialog(
-            title = "채널 추가",
-            initialName = "", initialUrl = "", initialLogo = "",
-            builtIn = false,
-            onDismiss = { showAdd = false },
-            onReset = null,
-            onConfirm = { name, url, logo ->
-                onAdd(name, url, logo)
-                showAdd = false
-            }
-        )
     }
 
     // ---------- 수정 ----------
@@ -238,7 +223,7 @@ fun ChannelManageScreen(
 }
 
 @Composable
-private fun ChannelDialog(
+internal fun ChannelDialog(
     title: String,
     initialName: String,
     initialUrl: String,
