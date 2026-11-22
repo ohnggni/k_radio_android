@@ -194,8 +194,13 @@ fun MainScreen(
             onClose = { big = false },
         )
     }
+    // 라이트 모드: 거의 흰 바탕 위에서 흰 로고가 떠 보여서 한 단계 진한 바탕(surfaceContainer)을 깔아 로고가 카드처럼 보이게.
+    // 다크 모드는 지금 바탕 그대로
+    val cs = MaterialTheme.colorScheme
+    val pageColor = if (cs.background.luminance() > 0.5f) cs.surfaceContainer else cs.background
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        containerColor = pageColor,
         topBar = {
             Column {
                 TopBanner(
