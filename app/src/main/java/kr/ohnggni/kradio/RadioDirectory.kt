@@ -49,7 +49,7 @@ object RadioDirectory {
         val all = (1..pages).map { pg ->
             async(Dispatchers.IO) {
                 runCatching { parseInlive(JSONObject(get(if (pg == 1) INLIVE_LIVE else "$INLIVE_LIVE?page=$pg"))) }
-                    .onFailure { Log.w("KRadio", "인라이브 목록 실패($pg쪽): ${it.message}") }
+                    .onFailure { Log.w("KRadio", "인라이브 목록 실패(${pg}쪽): ${it.message}") }
                     .getOrNull()
             }
         }.awaitAll()
