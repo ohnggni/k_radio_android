@@ -56,6 +56,7 @@ object ChannelRepository {
 
     /** 인터넷 방송 찾기 화면의 "추천 방송" 줄 (설정 파일 internetPicks, 없으면 빈 목록 → 줄 숨김) */
     @Volatile var internetPicks: List<WebStation> = emptyList()
+    @Volatile var internetPicksTitle: String = "추천 방송"
         private set
 
     /** 채널 설정에 있는 편성표 채널 ID들 (편성표에서 이 채널만 읽음) */
@@ -180,6 +181,7 @@ object ChannelRepository {
         nowPlayingUserAgent = root.optString("nowPlayingUserAgent").ifEmpty { null }
         coverUrl = root.optString("coverUrl").ifEmpty { null }
         internetPicks = RadioBrowser.parsePicks(root.optJSONArray("internetPicks"))
+        internetPicksTitle = root.optString("internetPicksTitle").ifEmpty { "추천 방송" }
         latestVersionCode = root.optLong("latestVersionCode", 0L).takeIf { it > 0 }
         latestVersionName = root.optString("latestVersionName").ifEmpty { null }
         updateUrl = root.optString("updateUrl").ifEmpty { null }

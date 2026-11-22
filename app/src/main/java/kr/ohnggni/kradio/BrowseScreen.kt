@@ -135,7 +135,7 @@ fun BrowseScreen(
                 val picks = ChannelRepository.internetPicks
                 if (picks.isNotEmpty()) {
                     item(key = "@picks") {
-                        StationShelf("추천 방송", { Result.success(picks) }, null,
+                        StationShelf(ChannelRepository.internetPicksTitle, { Result.success(picks) }, null,
                             addedUrls, previewUrl, onAdd, onPreview)
                     }
                 }
