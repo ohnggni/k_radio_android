@@ -106,9 +106,12 @@ object RadioDirectory {
     suspend fun korean(builtInNames: List<String> = emptyList()): List<WebStation> {
         val brands = builtInNames.mapNotNull { it.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { b -> b.length >= 2 } }
             .map { it.lowercase() }.toSet()
-        return browse("$OPML/Browse.ashx?c=lang&filter=l180&render=json", follow = 8)
-            .filterNot { st -> val n = st.name.lowercase(); brands.any { n.contains(it) } }
+        // 한국어 분류는 "음악/대화 → 장르 → 방송"처럼 두 단계 아래에 방송이 있음
+        val all = browse("$OPML/Browse.ashx?c=lang&filter=l180&render=json", follow = 8, depth = 2)
+        val kept = all.filterNot { st -> val n = st.name.lowercase(); brands.any { n.contains(it) } }
             .distinctBy { it.name.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "") }
+        Log.i("KRadio", "한국어 방송: 받은 ${all.size}개 → 기본 채널 방송사 제외 ${kept.size}개 (제외 기준: $brands)")
+        return kept
     }
 
     /** 이름 검색 (방송만) */
@@ -118,20 +121,15 @@ object RadioDirectory {
     /**
      * 목록을 받아 방송만 모음. 방송 없이 하위 분류 링크만 오면 앞쪽 몇 개(follow)를 더 받아서 합침
      */
-    private suspend fun browse(url: String, follow: Int = 0): List<WebStation> = withContext(Dispatchers.IO) {
-        val body = JSONObject(get(url)).optJSONArray("body") ?: JSONArray()
+    private suspend fun browse(url: String, follow: Int = 0, depth: Int = 1): List<WebStation> = withContext(Dispatchers.IO) {
+        val body = JSONObject(get(withJson(url))).optJSONArray("body") ?: JSONArray()
         val stations = ArrayList<WebStation>()
         val links = ArrayList<String>()
         collect(body, stations, links)
-        if (follow > 0 && stations.size < 10) {
+        if (follow > 0 && depth > 0 && stations.size < 10) {
             coroutineScope {
                 links.take(follow).map { link ->
-                    async {
-                        runCatching {
-                            val b = JSONObject(get(withJson(link))).optJSONArray("body") ?: JSONArray()
-                            val s = ArrayList<WebStation>(); collect(b, s, ArrayList()); s
-                        }.getOrDefault(emptyList())
-                    }
+                    async { runCatching { browse(link, follow, depth - 1) }.getOrDefault(emptyList()) }
                 }.awaitAll().forEach { stations += it }
             }
         }
@@ -179,7 +177,8 @@ object RadioDirectory {
         conn.connectTimeout = 6000
         conn.readTimeout = 10_000
         conn.setRequestProperty("User-Agent", userAgent)
-        conn.setRequestProperty("Accept-Language", "ko-KR,ko;q=0.9")
+        // 분류 이름을 영문으로 받아 앱에서 한글로 바꿈 (서비스가 주는 한국어 이름은 들쭉날쭉해서 칩 정리가 안 됨)
+        conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
         try {
             if (conn.responseCode !in 200..299) error("HTTP ${conn.responseCode}")
             return conn.inputStream.bufferedReader().use { it.readText() }

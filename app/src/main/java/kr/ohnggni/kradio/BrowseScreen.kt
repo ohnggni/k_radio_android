@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -32,6 +34,9 @@ private val GENRE_KO = mapOf(
     "Decades" to "연대별", "Alternative" to "얼터너티브", "Metal" to "메탈", "Dance" to "댄스",
     "Adult Hits" to "성인 히트", "Children's Music" to "어린이", "Holiday Music" to "시즌", "Soundtracks" to "OST",
 )
+
+/** 칩으로 바로 보여줄 장르 (한글 이름, 이 순서로. 나머지는 "장르 더 보기") */
+private val PINNED_GENRES = listOf("팝·Top 40", "록", "재즈", "클래식", "일렉트로닉", "소울·R&B")
 
 /** 목록 화면 하나: 제목 + 받기 함수 */
 private class BrowseList(val title: String, val fetch: suspend () -> List<WebStation>)
@@ -68,6 +73,7 @@ fun BrowseScreen(
     var genre by rememberSaveable { mutableStateOf<String?>(null) }   // 선택된 칩 표시 이름 (null = 추천)
     var list by remember { mutableStateOf<BrowseList?>(null) }
     var manual by remember { mutableStateOf(false) }
+    var showGenres by remember { mutableStateOf(false) }   // 장르 더 보기 창
 
     // 목록 화면에서 뒤로 가기 → 추천 첫 화면
     androidx.activity.compose.BackHandler(enabled = list != null) { list = null; genre = null }
@@ -127,32 +133,50 @@ fun BrowseScreen(
             }
             // ---------- 장르 칩 ----------
             item(key = "@chips") {
-                // 추천 · K-pop · 한국어 + 방송 안내 서비스의 음악 분류(받아 오는 대로)
+                // 칩은 짧게: 추천 · K-pop · 한국어 + 자주 찾는 장르 몇 개 + "장르 더 보기"(나머지는 창에서 가나다순)
                 val cats by produceState(emptyList<RadioDirectory.Category>()) {
                     value = runCatching { RadioDirectory.musicCategories() }.getOrDefault(emptyList())
                 }
-                val chips: List<Pair<String, (() -> BrowseList)?>> = listOf<Pair<String, (() -> BrowseList)?>>(
-                    "추천" to null,
-                    "K-pop" to { BrowseList("K-pop 방송") { RadioDirectory.search("kpop") } },
-                    "한국어" to { BrowseList("한국어 방송") { RadioDirectory.korean(builtInNames) } },
-                ) + cats.map { c ->
-                    val label = GENRE_KO[c.name] ?: c.name
-                    label to { BrowseList("$label 방송") { RadioDirectory.category(c.id) } }
+                val labeled = cats.map { (GENRE_KO[it.name] ?: it.name) to it }
+                val pinned = PINNED_GENRES.mapNotNull { want -> labeled.firstOrNull { it.first == want } }
+                val rest = (labeled - pinned.toSet()).sortedBy { it.first }
+                fun open(label: String, c: RadioDirectory.Category) {
+                    genre = label; list = BrowseList("$label 방송") { RadioDirectory.category(c.id) }
                 }
+                val chips: List<Pair<String, (() -> Unit)?>> = listOf<Pair<String, (() -> Unit)?>>(
+                    "추천" to null,
+                    "K-pop" to { genre = "K-pop"; list = BrowseList("K-pop 방송") { RadioDirectory.search("kpop") } },
+                    "한국어" to { genre = "한국어"; list = BrowseList("한국어 방송") { RadioDirectory.korean(builtInNames) } },
+                ) + pinned.map { (label, c) -> label to { open(label, c) } } +
+                    (if (rest.isNotEmpty()) listOf<Pair<String, (() -> Unit)?>>("장르 더 보기" to { showGenres = true }) else emptyList())
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(chips, key = { it.first }) { (label, make) ->
+                    items(chips, key = { it.first }) { (label, act) ->
+                        val inRest = rest.any { it.first == genre }
                         FilterChip(
-                            selected = genre == label || (label == "추천" && list == null),
-                            onClick = {
-                                if (make == null) { list = null; genre = null }
-                                else { genre = label; list = make() }
-                            },
-                            label = { Text(label) },
+                            selected = genre == label || (label == "추천" && list == null) || (label == "장르 더 보기" && inRest),
+                            onClick = { if (act == null) { list = null; genre = null } else act() },
+                            label = { Text(if (label == "장르 더 보기" && inRest) genre!! else label) },
                         )
                     }
+                }
+                if (showGenres) {
+                    AlertDialog(
+                        onDismissRequest = { showGenres = false },
+                        confirmButton = { TextButton(onClick = { showGenres = false }) { Text("닫기") } },
+                        title = { Text("장르") },
+                        text = {
+                            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                                rest.forEach { (label, c) ->
+                                    Text(label, style = MaterialTheme.typography.bodyLarge,
+                                        modifier = Modifier.fillMaxWidth().clickable { showGenres = false; open(label, c) }
+                                            .padding(vertical = 12.dp))
+                                }
+                            }
+                        }
+                    )
                 }
             }
 
