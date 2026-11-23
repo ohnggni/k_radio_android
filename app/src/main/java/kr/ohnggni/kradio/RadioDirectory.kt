@@ -34,7 +34,7 @@ data class WebStation(
 /**
  * 인터넷 방송 찾기 데이터.
  * - 인라이브 공개 API(liveList): 지금 방송 중인 개인 DJ 방송, 청취자 수·방송 그림 포함
- * - 인터넷 방송 안내 서비스(OPML, 비공식): 분류·한국어 방송·검색, 로고·안정성 점수 포함.
+ * - 인터넷 방송 안내 서비스(OPML, 비공식): 분류·검색, 로고·안정성 점수 포함.
  *   재생 주소는 방송 ID로 된 tune.ashx 주소를 그대로 저장 → 재생할 때마다 최신 실제 주소를 받음
  */
 object RadioDirectory {
@@ -98,21 +98,6 @@ object RadioDirectory {
 
     /** 분류 하나의 방송 목록 */
     suspend fun category(id: String): List<WebStation> = browse("$OPML/Browse.ashx?id=${enc(id)}&render=json")
-
-    /**
-     * 한국어 방송 (음악·대화 하위 분류까지 따라가서 모음).
-     * 앱에 이미 있는 방송사의 지역국·재송출이 잔뜩 섞여 와서, 기본 채널 이름의 첫 단어(방송사명)가 들어간 방송은 뺌
-     */
-    suspend fun korean(builtInNames: List<String> = emptyList()): List<WebStation> {
-        val brands = builtInNames.mapNotNull { it.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { b -> b.length >= 2 } }
-            .map { it.lowercase() }.toSet()
-        // 한국어 분류는 "음악/대화 → 장르 → 방송"처럼 두 단계 아래에 방송이 있음
-        val all = browse("$OPML/Browse.ashx?c=lang&filter=l180&render=json", follow = 8, depth = 2)
-        val kept = all.filterNot { st -> val n = st.name.lowercase(); brands.any { n.contains(it) } }
-            .distinctBy { it.name.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "") }
-        Log.i("KRadio", "한국어 방송: 받은 ${all.size}개 → 기본 채널 방송사 제외 ${kept.size}개 (제외 기준: $brands)")
-        return kept
-    }
 
     /** 이름 검색 (방송만) */
     suspend fun search(q: String): List<WebStation> =

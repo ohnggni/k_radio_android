@@ -50,7 +50,7 @@ private suspend fun searchAll(q: String): List<WebStation> {
 }
 
 /**
- * 인터넷 방송 찾기: 검색 + 장르 칩 + 추천 줄(추천 방송 / 지금 방송 중인 개인 DJ / 한국어 / K-pop).
+ * 인터넷 방송 찾기: 검색 + 장르 칩 + 추천 줄(추천 방송 / 지금 방송 중인 개인 DJ / K-pop).
  * "더 보기"·검색·장르는 세로 목록. + 버튼으로 바로 채널 추가(로고 포함).
  */
 @Composable
@@ -63,7 +63,6 @@ fun BrowseScreen(
     previewOn: Boolean,                             // 재생 중인지
     previewStatus: String,                          // 연결 중·오류 등 상태 글자
     onPreviewStop: () -> Unit,
-    builtInNames: List<String>,                     // 기본 채널 이름 (한국어 방송에서 같은 방송사 지역국 거르기)
     onBack: () -> Unit,
 ) {
     val previewUrl = preview?.url?.takeIf { previewOn }
@@ -133,7 +132,7 @@ fun BrowseScreen(
             }
             // ---------- 장르 칩 ----------
             item(key = "@chips") {
-                // 칩은 짧게: 추천 · K-pop · 한국어 + 자주 찾는 장르 몇 개 + "장르 더 보기"(나머지는 창에서 가나다순)
+                // 칩은 짧게: 추천 · K-pop + 자주 찾는 장르 몇 개 + "장르 더 보기"(나머지는 창에서 가나다순)
                 val cats by produceState(emptyList<RadioDirectory.Category>()) {
                     value = runCatching { RadioDirectory.musicCategories() }.getOrDefault(emptyList())
                 }
@@ -146,7 +145,6 @@ fun BrowseScreen(
                 val chips: List<Pair<String, (() -> Unit)?>> = listOf<Pair<String, (() -> Unit)?>>(
                     "추천" to null,
                     "K-pop" to { genre = "K-pop"; list = BrowseList("K-pop 방송") { RadioDirectory.search("kpop") } },
-                    "한국어" to { genre = "한국어"; list = BrowseList("한국어 방송") { RadioDirectory.korean(builtInNames) } },
                 ) + pinned.map { (label, c) -> label to { open(label, c) } } +
                     (if (rest.isNotEmpty()) listOf<Pair<String, (() -> Unit)?>>("장르 더 보기" to { showGenres = true }) else emptyList())
                 LazyRow(
@@ -192,11 +190,6 @@ fun BrowseScreen(
                 item(key = "@inlive") {
                     StationShelf("지금 방송 중인 개인 DJ", { runCatching { RadioDirectory.inliveOnAir().take(20) } },
                         { list = BrowseList("지금 방송 중인 개인 DJ") { RadioDirectory.inliveOnAir() } },
-                        addedUrls, previewUrl, onAdd, onPreview)
-                }
-                item(key = "@korean") {
-                    StationShelf("한국어 방송", { runCatching { RadioDirectory.korean(builtInNames).take(20) } },
-                        { genre = "한국어"; list = BrowseList("한국어 방송") { RadioDirectory.korean(builtInNames) } },
                         addedUrls, previewUrl, onAdd, onPreview)
                 }
                 item(key = "@kpop") {
@@ -260,6 +253,7 @@ private fun StationShelf(
     onPreview: ((WebStation) -> Unit)?,
 ) {
     val (load, retry) = rememberLoad(title, fetch)
+    if (load is Load.Done && load.list.isEmpty()) return   // 받은 방송이 없으면 줄 자체를 숨김
     Column(Modifier.padding(top = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -297,7 +291,7 @@ private fun StationList(
             Load.Loading -> LoadingLine()
             Load.Failed -> FailedLine(retry)
             is Load.Done -> if (load.list.isEmpty()) {
-                Text("찾은 방송이 없어요. 다른 이름이나 영문으로 찾아봐.", style = MaterialTheme.typography.bodyMedium,
+                Text("찾은 방송이 없어요. 다른 이름이나 영문으로 찾아보세요.", style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
             } else {
                 // 바깥 LazyColumn 안이라 일반 Column으로 (최대 100개)

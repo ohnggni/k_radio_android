@@ -384,7 +384,6 @@ class MainActivity : ComponentActivity() {
                         previewOn = isOn,
                         previewStatus = status,
                         onPreviewStop = { previewStation?.let { togglePreview(it) } },
-                        builtInNames = base.map { it.name },
                         onBack = { screen = browseFrom },
                     )
                     Screen.GUIDE -> GuideScreen(onBack = { screen = Screen.SETTINGS })
