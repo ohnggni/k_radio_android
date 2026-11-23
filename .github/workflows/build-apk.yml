@@ -29,12 +29,20 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Secrets → secrets.properties
+      - name: Secrets → secrets.properties, debug keystore
         env:
           SECRETS_PROPERTIES: ${{ secrets.SECRETS_PROPERTIES }}
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
         run: |
           test -n "$SECRETS_PROPERTIES" || { echo "SECRETS_PROPERTIES secret 없음"; exit 1; }
           printf '%s\n' "$SECRETS_PROPERTIES" > secrets.properties
+          # 고정 개발 키로 서명 → 폰에서 지우지 않고 덮어쓰기 설치 가능 (없으면 매번 새 키라 재설치 필요)
+          if [ -n "$DEBUG_KEYSTORE_B64" ]; then
+            mkdir -p ~/.android
+            echo "$DEBUG_KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+          else
+            echo "::warning::DEBUG_KEYSTORE_B64 secret 없음 - 매번 새 개발 키로 서명됨"
+          fi
 
       - name: Build
         run: ./gradlew --no-daemon assembleDebug
