@@ -1204,7 +1204,7 @@ private fun BigCover(
         when {
             c != null -> Image(c, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             // 내장 로고(512px)처럼 충분히 크면 표지 칸 전체를 채워 표지 사진처럼
-            l != null && l.width >= 256 -> Image(l, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            l != null && l.width >= 256 && l.isSquarish() -> Image(l, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             // 작은 로고(인터넷에서 받은 것 등)는 늘리면 흐려져서 가운데 흰 카드에 원래 비율로
             l != null -> Box(
                 Modifier.fillMaxSize().padding(bottom = if (showOverlay) 64.dp else 0.dp),   // 아래 글자와 겹치지 않게
@@ -1373,18 +1373,29 @@ fun ChannelLogo(url: String?, name: String, modifier: Modifier = Modifier, fallb
         contentAlignment = Alignment.Center
     ) {
         val b = bmp
-        if (b != null) {
+        if (b != null && b.isSquarish()) {
             Image(
                 bitmap = b,
                 contentDescription = name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
+        } else if (b != null) {
+            // 가로·세로로 긴 로고(글자 로고 등)는 잘리지 않게 흰 바탕에 통째로
+            Image(
+                bitmap = b,
+                contentDescription = name,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().background(Color.White).padding(6.dp)
+            )
         } else {
             Text(name.take(1), style = MaterialTheme.typography.titleMedium)
         }
     }
 }
+
+/** 거의 정사각인 그림인지 (꽉 채워 잘라 보여도 되는지) */
+internal fun ImageBitmap.isSquarish(): Boolean = width.toFloat() / height in 0.8f..1.25f
 
 /** 로고를 한 번 받아서 폰에 저장해두고 재사용 */
 /** 로고 불러오기: 앱 내장 로고 우선, 없으면 인터넷에서 받아 폰에 저장해두고 재사용 */
