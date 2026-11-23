@@ -188,8 +188,8 @@ fun BrowseScreen(
                     }
                 }
                 item(key = "@inlive") {
-                    StationShelf("지금 방송 중인 개인 DJ", { runCatching { RadioDirectory.inliveOnAir().take(20) } },
-                        { list = BrowseList("지금 방송 중인 개인 DJ") { RadioDirectory.inliveOnAir() } },
+                    StationShelf("인라이브 · 지금 방송 중인 개인 DJ", { runCatching { RadioDirectory.inliveOnAir().take(20) } },
+                        { list = BrowseList("인라이브 · 지금 방송 중인 개인 DJ") { RadioDirectory.inliveOnAir() } },
                         addedUrls, previewUrl, onAdd, onPreview)
                 }
                 item(key = "@kpop") {
