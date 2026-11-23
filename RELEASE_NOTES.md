@@ -7,7 +7,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 ## 1.16.0 (Unreleased)
 
 ### Added
-- Internet radio browser (the new button next to "All channels", or "Add channel" in Channel manager): recommended shelves (news, world music, classical and jazz, chill — curated in the remote config), live personal DJ broadcasts sorted by listeners, Korean-language and K-pop stations, genre chips and search. Tap a logo to preview a station (a bar at the bottom shows it with stop and add buttons; a preview gives up after two failed connections) and tap + to add it with its logo in one step. Entering a stream address by hand moved to the bottom of the browser.
+- Internet radio browser (the new button next to "All channels", or "Add channel" in Channel manager): recommended shelves (news, world music, classical and jazz, chill — curated in the remote config), live personal DJ broadcasts sorted by listeners, K-pop stations, genre chips (a few common genres plus a sorted "More genres" list) and search. Shelves with no results are hidden. Tap a logo to preview a station (a bar at the bottom shows it with stop and add buttons; a preview gives up after two failed connections) and tap + to add it with its logo in one step. Entering a stream address by hand moved to the bottom of the browser.
 - Full-screen player: swipe the cover left or right to switch to the next or previous channel.
 - Separate buttons on the main screen for Channel manager and the internet radio browser; Channel manager also has an "Add channel" button at the top.
 - **Data:** new optional top-level field `internetPicks` (`group`, `name`, `url`, `logo`, `sub`) for the browser's recommended shelves.
@@ -15,7 +15,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 ### Improved
 - Light theme: the main screen background is one step darker so white logos read as cards instead of floating on white.
 - Full-screen player: heavier transport buttons (tonal circles, larger play button), a thicker volume bar that spans the full cover width, and more room between the buttons and the volume bar.
-- All built-in channel logos were upscaled to 512×512, and channels without a program cover now fill the cover area with the logo instead of a small card.
+- All built-in channel logos were upscaled to 512×512, and channels without a program cover now fill the cover area with the logo instead of a small card. Non-square station images fill the cover width over a blurred copy of themselves, and wide text logos are shown whole on white instead of being cropped.
 - The channel-name banner moves to the top of the cover when program text is shown below it, and the channel name is no longer repeated over the banner for stations without a program guide.
 
 ### Fixed
@@ -23,7 +23,8 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ### Technical
 - Directory station addresses are stored as the directory's tune address and resolved to the current stream each time playback starts (handled like .pls/.m3u playlists).
-- Korean-language directory results hide relays of broadcasters that are already built-in channels.
+- A GitHub Actions workflow builds a debug test APK on every push (dev-latest prerelease).
+- Removed the unused toolchain resolver plugin from the Gradle settings.
 
 ---
 
