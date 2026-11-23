@@ -4,7 +4,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
-## 1.16.0 (Unreleased)
+## 1.16.0 (2026-11-23)
 
 ### Added
 - Internet radio browser (the new button next to "All channels", or "Add channel" in Channel manager): recommended shelves (news, world music, classical and jazz, chill — curated in the remote config), live personal DJ broadcasts sorted by listeners, K-pop stations, genre chips (a few common genres plus a sorted "More genres" list) and search. Shelves with no results are hidden. Tap a logo to preview a station (a bar at the bottom shows it with stop and add buttons; a preview gives up after two failed connections) and tap + to add it with its logo in one step. Entering a stream address by hand moved to the bottom of the browser.
