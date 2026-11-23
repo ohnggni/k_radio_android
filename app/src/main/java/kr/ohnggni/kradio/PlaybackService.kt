@@ -148,6 +148,7 @@ class PlaybackService : MediaLibraryService() {
     // 자동 재연결 상태
     private var retryJob: Job? = null
     private var retryCount = 0
+    private var lastTransitionId: String? = null   // 직전 채널 (재생 목록 교체 중 채널이 바뀌었는지 판단)
     private var retryForId: String? = null   // 재연결을 예약한 채널 (채널이 바뀌면 예약·횟수 초기화)
 
     // 알림·잠금화면·워치·차량에 보낼 방송 정보 갱신용
@@ -306,6 +307,13 @@ class PlaybackService : MediaLibraryService() {
                 // 방송 정보만 바뀐 경우(PLAYLIST_CHANGED)는 재연결 시도를 취소하지 않음.
                 // 단, 채널 자체가 바뀌었으면(미리 듣기 방송을 연달아 누를 때 등) 이전 채널의 재연결 예약·횟수를 버림
                 if (retryForId != null && mediaItem?.mediaId != retryForId) cancelRetry()
+                // 오토·앱에서 채널을 누르면 재생 목록을 새로 만들어 PLAYLIST_CHANGED로 오는데,
+                // 이때도 바로 방송 정보를 채워야 표지 그림 받기가 곧바로 시작됨 (전엔 1분 갱신까지 로고로 남았음)
+                val channelChanged = mediaItem?.mediaId != lastTransitionId
+                lastTransitionId = mediaItem?.mediaId
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && channelChanged) {
+                    scope.launch { updateNowPlaying() }
+                }
                 if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                     cancelRetry()
                     scope.launch { updateNowPlaying() }
@@ -810,6 +818,7 @@ class PlaybackService : MediaLibraryService() {
             val byId = allChannels.associateBy { it.id }
             var changed = false
 
+            val prefetchCovers = ArrayList<String>()
             val items = (0 until count).map { i ->
                 val item = exo.getMediaItemAt(i)
                 val ch = byId[item.mediaId] ?: return@map item
@@ -819,9 +828,10 @@ class PlaybackService : MediaLibraryService() {
                 val songArt = songArts[ch.id]
                 val cp = coverProgram(ch, program)
                 val cover = cp?.image
-                // 줄인 표지 그림은 지금 채널만 준비 (다른 채널은 이미 준비된 것만 표시)
+                // 줄인 표지 그림: 지금 채널은 바로 준비, 다른 채널은 이미 준비된 것만 표시하고 뒤에서 미리 받아 둠
+                // (채널을 넘길 때 처음부터 표지가 나오게. 이미 받은 건 다시 안 받음 → 프로그램이 바뀔 때 채널당 1번)
                 val coverArt = if (i == exo.currentMediaItemIndex) coverArtFor(cover)
-                               else cover?.takeIf { CoverArt.isReady(this, it) }
+                               else cover?.takeIf { CoverArt.isReady(this, it) } ?: run { cover?.let { prefetchCovers += it }; null }
                 val host = cp?.persons?.takeIf { it.isNotEmpty() }?.joinToString(", ")
                 val rec = recents[ch.id]
                 val span = if (song != null) songSpans[ch.id] else null
@@ -861,6 +871,10 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
 
+            // 다른 채널 표지는 하나씩 천천히 (실패한 건 CoverArt가 30분 쉼). 채널을 바꾸면 그때 바로 쓰임
+            if (prefetchCovers.isNotEmpty()) scope.launch {
+                prefetchCovers.distinct().forEach { CoverArt.prepare(this@PlaybackService, it) }
+            }
             if (!changed) return
             // 모든 항목의 주소가 그대로라 재생 중인 채널도 끊기지 않고 표시 정보만 바뀜
             exo.replaceMediaItems(0, count, items)

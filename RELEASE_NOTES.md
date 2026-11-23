@@ -19,6 +19,7 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 - The channel-name banner moves to the top of the cover when program text is shown below it, and the channel name is no longer repeated over the banner for stations without a program guide.
 
 ### Fixed
+- Program covers in Android Auto, notifications and the watch could take a minute or more to replace the channel logo after picking a channel from a list; the cover is now prepared as soon as the channel changes, and covers for the other channels' current programs are fetched in the background.
 - Switching channels while a reconnection was pending no longer carries the previous channel's retry count over.
 
 ### Technical
