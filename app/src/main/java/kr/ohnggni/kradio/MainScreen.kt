@@ -78,6 +78,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -1205,6 +1206,14 @@ private fun BigCover(
             c != null -> Image(c, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             // 내장 로고(512px)처럼 충분히 크면 표지 칸 전체를 채워 표지 사진처럼
             l != null && l.width >= 256 && l.isSquarish() -> Image(l, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            // 가로·세로로 긴 그림(인터넷 방송 그림 등): 통째로 가로를 채우고, 남는 칸엔 같은 그림을 흐리게 깔아줌
+            // (흐림은 안드로이드 12+에서만, 그 아래는 어둡게 덮은 그림만)
+            l != null && l.width >= 256 -> Box(Modifier.fillMaxSize()) {
+                Image(l, contentDescription = null, contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().blur(28.dp))
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)))
+                Image(l, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+            }
             // 작은 로고(인터넷에서 받은 것 등)는 늘리면 흐려져서 가운데 흰 카드에 원래 비율로
             l != null -> Box(
                 Modifier.fillMaxSize().padding(bottom = if (showOverlay) 64.dp else 0.dp),   // 아래 글자와 겹치지 않게
