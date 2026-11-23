@@ -1,0 +1,52 @@
+name: Build test APK
+
+# 푸시할 때마다 개발용(.debug) APK를 빌드해서 'dev-latest' 프리릴리스에 덮어 올림
+# 받는 곳: https://github.com/ohnggni/k_radio_android/releases/download/dev-latest/KRadio-dev.apk
+# 정식 배포(release.sh)와는 별개. 정식 서명 키는 쓰지 않음
+on:
+  push:
+    branches: [main, "feature/**"]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Secrets → secrets.properties
+        env:
+          SECRETS_PROPERTIES: ${{ secrets.SECRETS_PROPERTIES }}
+        run: |
+          test -n "$SECRETS_PROPERTIES" || { echo "SECRETS_PROPERTIES secret 없음"; exit 1; }
+          printf '%s\n' "$SECRETS_PROPERTIES" > secrets.properties
+
+      - name: Build
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Upload to dev-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=KRadio-dev.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "$APK"
+          gh release delete dev-latest --cleanup-tag -y || true
+          gh release create dev-latest "$APK" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "dev-latest b${GITHUB_RUN_NUMBER} (${GITHUB_REF_NAME} @ ${GITHUB_SHA::7})" \
+            --notes "Test build (debug, not for general use): $(git log -1 --pretty='%s')"
