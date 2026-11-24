@@ -4,6 +4,13 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ---
 
+## 1.16.1 (Unreleased)
+
+### Fixed
+- The live DJ shelf in the internet radio browser only ever showed the first 50 live broadcasts; it now loads every live broadcast (paging by page number) and sorts them by listeners.
+
+---
+
 ## 1.16.0 (2026-11-23)
 
 ### Added

@@ -44,20 +44,32 @@ object RadioDirectory {
 
     private const val INLIVE_LIVE = "https://api.inlive.co.kr/openapi/liveList"
 
-    /** 지금 방송 중인 인라이브 방송, 청취자 많은 순 (50개씩 pages번, 최대 150개) */
-    suspend fun inliveOnAir(pages: Int = 3): List<WebStation> = coroutineScope {
-        val all = (1..pages).map { pg ->
+    @Volatile private var inliveCache: Pair<Long, List<WebStation>>? = null
+
+    /**
+     * 지금 방송 중인 인라이브 방송 전부, 청취자 많은 순.
+     * start는 쪽 번호(1부터, 쪽당 최대 50개). 1쪽의 total로 나머지 쪽 수를 정해 한꺼번에 받음 (최대 10쪽).
+     * 첫 줄·더 보기·검색이 연달아 부르므로 1분 동안은 받아 둔 걸 씀
+     */
+    suspend fun inliveOnAir(): List<WebStation> = coroutineScope {
+        inliveCache?.let { (at, list) -> if (System.currentTimeMillis() - at < 60_000) return@coroutineScope list }
+        fun url(page: Int) = "$INLIVE_LIVE?onair=Y&gubun=A&display=50&start=$page"
+        val first = withContext(Dispatchers.IO) { JSONObject(get(url(1))) }
+        val total = first.optString("total").toIntOrNull() ?: 0
+        val pages = ((total + 49) / 50).coerceIn(1, 10)
+        val rest = (2..pages).map { pg ->
             async(Dispatchers.IO) {
-                // onair=Y 방송 중만, display 최대 50, start = 결과 시작점(1부터)
-                runCatching { parseInlive(JSONObject(get("$INLIVE_LIVE?onair=Y&gubun=A&display=50&start=${1 + (pg - 1) * 50}"))) }
+                runCatching { parseInlive(JSONObject(get(url(pg)))) }
                     .onFailure { Log.w("KRadio", "인라이브 목록 실패(${pg}쪽): ${it.message}") }
-                    .getOrNull()
+                    .getOrDefault(emptyList())
             }
         }.awaitAll()
-        if (all.all { it == null }) error("인라이브 목록을 못 받음")
-        all.filterNotNull().flatten()
+        val list = (parseInlive(first) + rest.flatten())
             .distinctBy { it.url }
             .sortedByDescending { it.listeners }
+        Log.i("KRadio", "인라이브 방송 중: ${list.size}개 (전체 ${total}개, ${pages}쪽)")
+        inliveCache = System.currentTimeMillis() to list
+        list
     }
 
     private fun parseInlive(o: JSONObject): List<WebStation> {
