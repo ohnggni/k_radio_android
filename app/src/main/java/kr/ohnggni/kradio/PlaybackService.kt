@@ -331,7 +331,7 @@ class PlaybackService : MediaLibraryService() {
                 // 이때도 바로 방송 정보를 채워야 표지 그림 받기가 곧바로 시작됨 (전엔 1분 갱신까지 로고로 남았음)
                 val channelChanged = mediaItem?.mediaId != lastTransitionId
                 lastTransitionId = mediaItem?.mediaId
-                if (channelChanged) { silenceMeter.reset(); silentNow = false }
+                if (channelChanged) { silenceMeter.restartMeasure(); silentNow = false }
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && channelChanged) {
                     scope.launch { updateNowPlaying() }
                 }
@@ -354,7 +354,7 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) silenceMeter.reset()   // 재생을 (다시) 시작하면 소리 재기도 처음부터
+                if (isPlaying) silenceMeter.restartMeasure()   // 재생을 (다시) 시작하면 소리 재기도 처음부터
                 if (isPlaying && retryCount > 0) {
                     Log.i("KRadio", "재연결 성공")
                     cancelRetry()

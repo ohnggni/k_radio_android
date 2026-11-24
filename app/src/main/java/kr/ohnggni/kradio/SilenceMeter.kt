@@ -20,7 +20,7 @@ class SilenceMeter : BaseAudioProcessor() {
     @Volatile private var lastLoudAt = System.currentTimeMillis()
 
     /** 채널이 바뀌거나 재생을 새로 시작할 때: 지금부터 다시 잼 */
-    fun reset() { lastLoudAt = System.currentTimeMillis() }
+    fun restartMeasure() { lastLoudAt = System.currentTimeMillis() }
 
     /** 마지막으로 소리가 난 뒤 지난 시간(ms) */
     fun quietFor(): Long = System.currentTimeMillis() - lastLoudAt
