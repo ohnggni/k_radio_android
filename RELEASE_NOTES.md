@@ -6,6 +6,9 @@ Changes marked **Data** are delivered through the remote channel config or EPG f
 
 ## 1.16.1 (Unreleased)
 
+### Added
+- Silent stream notice: when the playing station sends only silence for more than 20 seconds (for example a personal DJ who stopped broadcasting), the player and the notification / Android Auto subtitle show "silent broadcast (on a break)". Playback continues and the notice disappears as soon as sound returns.
+
 ### Fixed
 - The live DJ shelf in the internet radio browser only ever showed the first 50 live broadcasts; it now loads every live broadcast (paging by page number) and sorts them by listeners.
 

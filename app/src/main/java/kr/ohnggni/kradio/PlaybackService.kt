@@ -24,7 +24,10 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaSession
@@ -88,6 +91,9 @@ internal const val RECENT_EXTRA = "kradio.recent"
 /** 지금 곡의 시작·끝 시각 (epoch 밀리초, 선곡 정보가 있을 때만, 큰 재생기 진행 막대) */
 internal const val SONG_START_EXTRA = "kradio.songstart"
 internal const val SONG_END_EXTRA = "kradio.songend"
+/** 재생 중인 방송이 20초 넘게 소리가 없음 (DJ가 송출을 멈춘 개인 방송 등). 지금 채널에만 */
+internal const val SILENT_EXTRA = "kradio.silent"
+internal const val SILENT_TEXT = "소리 없는 방송이에요 (쉬는 중)"
 private const val RESOLVE_CACHE_MS = 10 * 60 * 1000L // 해석한 주소 10분간 재사용
 private const val MAX_RETRY_DELAY_MS = 30_000L       // 재연결 최대 대기 간격
 
@@ -148,6 +154,10 @@ class PlaybackService : MediaLibraryService() {
     // 자동 재연결 상태
     private var retryJob: Job? = null
     private var retryCount = 0
+    // 소리 없는 방송 감지
+    private val silenceMeter = SilenceMeter()
+    @Volatile private var silentNow = false
+    private var quietWatchJob: Job? = null   // (silenceJob은 음량 0 자동 정지용으로 이미 있음)
     private var lastTransitionId: String? = null   // 직전 채널 (재생 목록 교체 중 채널이 바뀌었는지 판단)
     private var retryForId: String? = null   // 재연결을 예약한 채널 (채널이 바뀌면 예약·횟수 초기화)
 
@@ -282,7 +292,17 @@ class PlaybackService : MediaLibraryService() {
             resolveSpec(spec)
         }
 
-        val exo = ExoPlayer.Builder(this)
+        // 방송 소리 크기를 재는 처리기를 끼운 렌더러 (소리는 그대로 통과)
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: android.content.Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink = DefaultAudioSink.Builder(context)
+                .setAudioProcessors(arrayOf(silenceMeter))
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .build()
+        }
+        val exo = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .setAudioAttributes(audioAttrs, true)
             .setHandleAudioBecomingNoisy(true)
@@ -311,6 +331,7 @@ class PlaybackService : MediaLibraryService() {
                 // 이때도 바로 방송 정보를 채워야 표지 그림 받기가 곧바로 시작됨 (전엔 1분 갱신까지 로고로 남았음)
                 val channelChanged = mediaItem?.mediaId != lastTransitionId
                 lastTransitionId = mediaItem?.mediaId
+                if (channelChanged) { silenceMeter.reset(); silentNow = false }
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && channelChanged) {
                     scope.launch { updateNowPlaying() }
                 }
@@ -333,6 +354,7 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) silenceMeter.reset()   // 재생을 (다시) 시작하면 소리 재기도 처음부터
                 if (isPlaying && retryCount > 0) {
                     Log.i("KRadio", "재연결 성공")
                     cancelRetry()
@@ -494,6 +516,19 @@ class PlaybackService : MediaLibraryService() {
                 updateNowPlaying()
                 val now = System.currentTimeMillis()
                 delay(60_000L - now % 60_000L + 1_000L)
+            }
+        }
+        // 5초마다: 재생 중인데 20초 넘게 소리가 없으면 "소리 없는 방송" 표시 (재생은 계속)
+        quietWatchJob = scope.launch {
+            while (true) {
+                delay(5_000)
+                val exo = exoPlayer ?: continue
+                val silent = exo.isPlaying && silenceMeter.quietFor() > 20_000
+                if (silent != silentNow) {
+                    silentNow = silent
+                    Log.i("KRadio", if (silent) "소리 없는 방송: ${exo.currentMediaItem?.mediaId}" else "소리 다시 나옴")
+                    updateNowPlaying()
+                }
             }
         }
         scheduleSleep()
@@ -835,8 +870,9 @@ class PlaybackService : MediaLibraryService() {
                 val host = cp?.persons?.takeIf { it.isNotEmpty() }?.joinToString(", ")
                 val rec = recents[ch.id]
                 val span = if (song != null) songSpans[ch.id] else null
-                val artist = song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group
-                val subtitle = song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group
+                val silent = silentNow && i == exo.currentMediaItemIndex
+                val artist = if (silent) SILENT_TEXT else song?.let { "♪ $it" } ?: program?.let { programLabel(it) } ?: ch.group
+                val subtitle = if (silent) SILENT_TEXT else song?.let { "♪ $it" } ?: program?.let { programWithTime(it) } ?: ch.group
                 // 항목에는 로고 주소만. 재생 중 채널의 그림 데이터는 nowPlayingMeta()가 내보낼 때 붙임
                 val wantArt = logoUri(ch)
 
@@ -849,6 +885,7 @@ class PlaybackService : MediaLibraryService() {
                     cur.extras?.getString(COVER_EXTRA) == cover &&
                     cur.extras?.getString(HOST_EXTRA) == host &&
                     cur.extras?.getString(COVER_ART_EXTRA) == coverArt &&
+                    (cur.extras?.getBoolean(SILENT_EXTRA, false) ?: false) == silent &&
                     cur.extras?.getStringArrayList(RECENT_EXTRA) == rec &&
                     cur.extras?.getLong(SONG_START_EXTRA, 0L) == (span?.get(0) ?: 0L) &&
                     cur.extras?.getLong(SONG_END_EXTRA, 0L) == (span?.get(1) ?: 0L)) {
@@ -864,7 +901,7 @@ class PlaybackService : MediaLibraryService() {
                                 .setSubtitle(subtitle)
                                 .setArtworkUri(wantArt)
                                 .setArtworkData(null, null)
-                                .setExtras(songBundle(song, songArt, cover, host, rec, span, coverArt))
+                                .setExtras(songBundle(song, songArt, cover, host, rec, span, coverArt, silent))
                                 .build()
                         )
                         .build()
@@ -1206,8 +1243,9 @@ class PlaybackService : MediaLibraryService() {
         song: String?, art: String?, cover: String?, host: String?, recent: ArrayList<String>?,
         span: LongArray? = null,
         coverArt: String? = null,
+        silent: Boolean = false,
     ): android.os.Bundle? =
-        if (song == null && cover == null && host == null && recent == null) null
+        if (song == null && cover == null && host == null && recent == null && !silent) null
         else android.os.Bundle().apply {
             song?.let { putString(SONG_EXTRA, it) }
             if (song != null) art?.let { putString(SONG_ART_EXTRA, it) }
@@ -1216,6 +1254,7 @@ class PlaybackService : MediaLibraryService() {
             recent?.let { putStringArrayList(RECENT_EXTRA, it) }
             span?.let { putLong(SONG_START_EXTRA, it[0]); putLong(SONG_END_EXTRA, it[1]) }
             coverArt?.let { putString(COVER_ART_EXTRA, it) }
+            if (silent) putBoolean(SILENT_EXTRA, true)
         }
 
     /**

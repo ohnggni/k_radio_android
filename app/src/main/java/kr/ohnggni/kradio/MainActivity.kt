@@ -449,6 +449,9 @@ class MainActivity : ComponentActivity() {
                     host = mediaMetadata.extras?.getString(HOST_EXTRA)
                     recent = mediaMetadata.extras?.getStringArrayList(RECENT_EXTRA) ?: emptyList()
                     songSpan = spanOf(mediaMetadata.extras)
+                    // 소리 없는 방송(DJ가 송출을 멈춘 개인 방송 등): 상태 줄에 안내, 소리가 다시 나면 지움
+                    if (mediaMetadata.extras?.getBoolean(SILENT_EXTRA, false) == true) status = SILENT_TEXT
+                    else if (status == SILENT_TEXT) status = ""
                 }
                 override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                     isOn = playWhenReady
